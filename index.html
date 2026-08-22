@@ -122,7 +122,7 @@
             <button onclick="uploadExcelMenu()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2 rounded-lg shadow-sm transition shrink-0">上傳新 Excel 菜單</button>
           </div>
           <p class="text-[11px] text-slate-400 leading-relaxed">
-            支援欄位：<b>品項</b>／<b>價格</b>／規格 (選填，格式 <code>大份:20/小份:0</code>)／加點 (選填，格式 <code>加蛋:15/加肉:30</code>)／類別 (選填，填「飲料」或「餐點」)
+            支援欄位：<b>品項</b>／<b>價格</b>／規格 (選填，格式 <code>大份:20/小份:0</code>)／加點 (選填，格式 <code>加蛋:15/加肉:30</code>)／類別 (選填，填「飲料」、「湯品」或「餐點」)
           </p>
 
           <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center pt-1">
@@ -158,7 +158,7 @@
             <div id="stat-meal-count" class="text-lg font-extrabold text-blue-700">0</div>
           </div>
           <div class="bg-amber-50 border border-amber-100 rounded-xl p-2.5">
-            <div class="text-[11px] text-amber-600 font-semibold">飲料總份數</div>
+            <div class="text-[11px] text-amber-600 font-semibold">湯品/飲料總份數</div>
             <div id="stat-drink-count" class="text-lg font-extrabold text-amber-700">0</div>
           </div>
           <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-2.5">
@@ -299,7 +299,7 @@
     let editingItems = [];
     let selectedMenuIndex = null;
 
-    const DRINK_KEYWORDS = ['茶','咖啡','可樂','汽水','果汁','豆漿','奶茶','可可','紅茶','綠茶','冬瓜','紅葉','珍奶','飲料','奶昔','氣泡水','沙士'];
+    const DRINK_KEYWORDS = ['茶','咖啡','可樂','汽水','果汁','豆漿','奶茶','可可','紅茶','綠茶','冬瓜','紅葉','珍奶','飲料','奶昔','氣泡水','沙士','湯','羹','味噌湯','玉米濃湯','清湯','酸辣湯','牛肉湯'];
     const DIET_WARNING_KEYWORDS = ['素','全素','蔬食','過敏','禁忌','不吃','不含'];
 
     async function init() {
@@ -856,7 +856,7 @@
           const sizes = parseSpecColumn(row['規格']);
           const addOns = parseAddOnColumn(row['加點'] || row['加點項目']);
           const rawCategory = (row['類別'] || row['分類'] || '').toString();
-          const category = rawCategory.includes('飲') ? 'drink' : (rawCategory.includes('餐') ? 'meal' : guessCategory(String(name)));
+          const category = rawCategory.includes('飲') || rawCategory.includes('湯') ? 'drink' : (rawCategory.includes('餐') ? 'meal' : guessCategory(String(name)));
           return { name, price, sizes, addOns, category };
         }).filter(i => i.name && i.name !== '未命名' && i.price >= 0);
 
@@ -1018,7 +1018,6 @@
 
       const box = document.getElementById('summary-items-box');
       
-      // 將區塊二的明細排序：先依主餐名稱字串排序，若主餐名稱相同，則依其規格或備註（如大小盛等）排序，避免雜亂無章
       const sortedKeys = Object.keys(summary).sort((a, b) => {
         return a.localeCompare(b, 'zh-Hant');
       });
@@ -1032,12 +1031,12 @@
         </div>`;
       }
 
-      html += `<div class="font-bold border-t border-slate-200 pt-2.5 mt-3 text-right text-slate-800 text-base">餐點總份數：${mealCount} 份 ｜ 飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元</div>`;
+      html += `<div class="font-bold border-t border-slate-200 pt-2.5 mt-3 text-right text-slate-800 text-base">餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元</div>`;
       box.innerHTML = html;
     }
 
     function copyLineMessage() {
-      const { summary, specialNotes, totalAmount } = computeSummary();
+      const { summary, specialNotes, totalAmount, mealCount, drinkCount } = computeSummary();
 
       let text = `【團購訂餐報餐明細】\n`;
       text += `訂購單位：${document.getElementById('info-unit').value}\n`;
@@ -1055,7 +1054,9 @@
         specialNotes.forEach(n => text += `${n}\n`);
       }
 
-      text += `------------------------\n總金額：$${totalAmount} 元`;
+      text += `------------------------\n`;
+      text += `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份\n`;
+      text += `總金額：$${totalAmount} 元`;
 
       navigator.clipboard.writeText(text);
       alert('📋 已成功將 Line 報餐訊息複製至剪貼簿！');
@@ -1294,7 +1295,7 @@
         const worksheet = XLSX.utils.json_to_sheet(rows);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "按餐點發放");
-        XLSX.writeFile(workbook, `團購訂單_按餐點發放_${new Date().toISOString().slice(0,10)}.toISOString().slice(0,10)}.xlsx`);
+        XLSX.writeFile(workbook, `團購訂單_按餐點發放_${new Date().toISOString().slice(0,10)}.xlsx`);
       }
     }
 
