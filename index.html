@@ -293,7 +293,6 @@
   <script>
     const SUPABASE_URL = "https://imuyohxrtyarclgzrole.supabase.co";
     const SUPABASE_KEY = "sb_publishable_Qv7AV8g5EhjVnT795Qm-qA_ZuJK772Y";
-    // 使用全域變數 window.supabase.createClient 避免初始化卡住
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     let currentMenuData = [];      
@@ -308,7 +307,7 @@
     let viewMode = 'person';
     let editingOrderId = null;
     let editingItems = [];
-    let selectedMenuIndex = null; // 紀錄目前選擇的下拉選單餐點索引
+    let selectedMenuIndex = null;
 
     const DRINK_KEYWORDS = ['茶','咖啡','可樂','汽水','果汁','豆漿','奶茶','可可','紅茶','綠茶','冬瓜','紅葉','珍奶','飲料','奶昔','氣泡水','沙士'];
     const DIET_WARNING_KEYWORDS = ['素','全素','蔬食','過敏','禁忌','不吃','不含'];
@@ -320,7 +319,6 @@
       await fetchActiveMenu();
       await fetchOrders();
       document.addEventListener('click', (e) => {
-        // 全局點擊關閉歷史菜單與品項下拉選單
         const historyWrap = document.getElementById('history-menu-search')?.parentElement;
         if (historyWrap && !historyWrap.contains(e.target)) {
           document.getElementById('history-menu-dropdown')?.classList.add('hidden');
@@ -337,7 +335,7 @@
     async function ensureCurrentGroup() {
       const { data } = await sb.from('settings').select('*').eq('key', 'current_group_id').maybeSingle();
       if (data && data.value) {
-        currentGroupId = data.value.replace(/"/g, '');
+        currentGroupId = typeof data.value === 'string' ? data.value.replace(/"/g, '') : data.value;
       } else {
         currentGroupId = crypto.randomUUID();
         await sb.from('settings').upsert({ key: 'current_group_id', value: JSON.stringify(currentGroupId) });
@@ -351,7 +349,7 @@
         const cutoff = data.find(s => s.key === 'cutoff_time');
         const status = data.find(s => s.key === 'is_active');
         if (cutoff) {
-          const val = cutoff.value.replace(/"/g, '');
+          const val = typeof cutoff.value === 'string' ? cutoff.value.replace(/"/g, '') : cutoff.value;
           document.getElementById('cutoff-time-input').value = val;
           document.getElementById('broadcast-bar').innerText = val ? `📢 預計 ${val} 結單，請儘速下單！` : '📢 尚未設定結單時間';
         }
@@ -409,18 +407,15 @@
       renderPrintTable();
     }
 
-    // 處理搜尋輸入與清空點購狀態
     function handleSearchInput() {
       const inputVal = document.getElementById('search-menu-input').value.trim();
       if (!inputVal) {
-        // 如果「選擇或搜尋品項」已經清空，「正在點購：」也清空隱藏
         document.getElementById('selected-item-panel').classList.add('hidden');
         selectedMenuIndex = null;
       }
       renderMenuDropdown();
     }
 
-    // 渲染下拉選單項目
     function renderMenuDropdown() {
       const dropdown = document.getElementById('menu-dropdown-list');
       const keyword = document.getElementById('search-menu-input').value.trim().toLowerCase();
@@ -447,7 +442,6 @@
       dropdown.classList.remove('hidden');
     }
 
-    // 點擊選擇品項後，開啟詳細客製化區塊
     function selectMenuItem(origIdx) {
       selectedMenuIndex = origIdx;
       const item = currentMenuData[origIdx];
@@ -466,7 +460,6 @@
           <span class="text-sm font-extrabold text-rose-600">$${item.price}</span>
         </div>
 
-        <!-- 動態規格 (單選) -->
         ${sizes.length > 1 ? `
           <div class="text-xs space-y-1">
             <span class="font-bold text-slate-600">選擇規格：</span>
@@ -481,7 +474,6 @@
           </div>
         ` : ''}
 
-        <!-- 加點選項 (複選) -->
         ${addOns.length > 0 ? `
           <div class="text-xs space-y-1">
             <span class="font-bold text-slate-600">加點加價選項：</span>
@@ -496,12 +488,10 @@
           </div>
         ` : ''}
 
-        <!-- 備註與前台數量選擇 [ - ] 1 [ + ] & 即時小計 -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-1">
           <input type="text" id="note-${origIdx}" placeholder="其他備註" class="border border-slate-300 text-xs p-2 rounded-lg w-full sm:w-56 outline-none bg-white">
 
           <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
-            <!-- 前台數量選擇按鈕區 -->
             <div class="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shrink-0">
               <button type="button" onclick="changeQuantity(${origIdx}, -1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-r border-slate-300 select-none">-</button>
               <input type="number" id="qty-${origIdx}" value="1" min="1" onchange="updateItemCalc(${origIdx})" class="w-9 text-center text-xs font-bold focus:outline-none p-1">
@@ -520,7 +510,6 @@
       updateItemCalc(origIdx);
     }
 
-    // 動態調整數量按鈕邏輯
     function changeQuantity(idx, delta) {
       const input = document.getElementById(`qty-${idx}`);
       if (!input) return;
@@ -563,7 +552,6 @@
         specNotes.push(noteInput.value.trim());
       }
 
-      // 取得數量選擇框的值
       const qtyInput = document.getElementById(`qty-${idx}`);
       const qty = qtyInput ? (parseInt(qtyInput.value) || 1) : 1;
 
@@ -588,7 +576,6 @@
       return DRINK_KEYWORDS.some(k => name.includes(k)) ? 'drink' : 'meal';
     }
 
-    // 輔助函式：整併購物車內的重複品項
     function mergeCartItems(cart) {
       const mergedMap = new Map();
       cart.forEach(item => {
@@ -609,10 +596,9 @@
       if (!details) return;
 
       userCart.push(details);
-      userCart = mergeCartItems(userCart); // 加入時自動整併同名與同備註品項
+      userCart = mergeCartItems(userCart);
       renderCart();
 
-      // 清空目前搜尋與隱藏客製面板，保持介面乾淨
       document.getElementById('search-menu-input').value = '';
       document.getElementById('selected-item-panel').classList.add('hidden');
       selectedMenuIndex = null;
@@ -653,7 +639,6 @@
       renderCart();
     }
 
-    // 當輸入姓名改變時，若對應到歷史訂單則帶入，若無對應則自動清空購物車，避免跨人混淆
     function debounceHandleUserNameChange() {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
@@ -673,7 +658,6 @@
       }, 400);
     }
 
-    // 送出訂單
     async function submitOrder() {
       if (!isOrderingOpen) return alert('本次團購已結單！');
       const name = document.getElementById('user-name-input').value.trim();
@@ -685,7 +669,6 @@
       submitBtn.innerText = '⏳ 訂單傳送中...';
 
       try {
-        // 送出前再次確保整併重複品項
         const finalCart = mergeCartItems(userCart);
         let total = 0;
         finalCart.forEach(i => total += i.price * i.qty);
@@ -707,7 +690,6 @@
         } else {
           alert(`🎉 訂購成功！${name} 應付 $${total} 元`);
           
-          // 送出成功後直接清空購物車與前台填寫資訊
           userCart = [];
           renderCart();
           document.getElementById('user-name-input').value = '';
@@ -725,27 +707,28 @@
       }
     }
 
-    // ---------- 管理者登入 / 密碼 ----------
+    // ---------- 管理者登入 / 密碼 (改用直接讀寫 settings 表) ----------
     async function toggleAdminAuth() {
       const pwd = prompt("請輸入管理者密碼：");
       if (!pwd) return;
 
-      if (pwd === "1234") {
-        document.getElementById('admin-section').classList.remove('hidden');
-        document.getElementById('user-section').classList.add('hidden');
-        return;
-      }
-
       try {
-        const { data, error } = await sb.rpc('verify_admin_password', { input_password: pwd });
-        if (!error && data === true) {
+        const { data } = await sb.from('settings').select('value').eq('key', 'admin_password').maybeSingle();
+        let dbPassword = "1234";
+        if (data && data.value) {
+          dbPassword = typeof data.value === 'string' ? data.value.replace(/"/g, '') : data.value;
+        }
+
+        if (pwd === dbPassword) {
           document.getElementById('admin-section').classList.remove('hidden');
           document.getElementById('user-section').classList.add('hidden');
           return;
         }
-      } catch(e) {}
+      } catch(e) {
+        console.error('驗證密碼發生錯誤:', e);
+      }
 
-      alert("密碼錯誤！預設密碼為 1234");
+      alert("密碼錯誤！");
     }
 
     function closeAdmin() {
@@ -783,23 +766,41 @@
     function openChangePasswordModal() { document.getElementById('password-modal').classList.remove('hidden'); }
     function closePasswordModal() { document.getElementById('password-modal').classList.add('hidden'); }
 
+    // 修改密碼：直接查詢 settings 資料庫舊密碼，比對後寫入新密碼
     async function submitChangePassword() {
       const oldP = document.getElementById('pwd-old').value;
       const new1 = document.getElementById('pwd-new1').value;
       const new2 = document.getElementById('pwd-new2').value;
 
+      if (!oldP) return alert('請輸入舊密碼！');
       if (!new1) return alert('新密碼不可為空！');
       if (new1 !== new2) return alert('兩次新密碼輸入不一致！');
 
-      const { data, error } = await sb.rpc('change_admin_password', { old_password: oldP, new_password: new1 });
-      if (error) return alert('密碼修改失敗，請確認 Supabase RPC 已設定！');
-      if (data !== true) return alert('舊密碼不正確！');
+      try {
+        const { data, error } = await sb.from('settings').select('value').eq('key', 'admin_password').maybeSingle();
+        let currentDbPassword = "1234";
+        if (data && data.value) {
+          currentDbPassword = typeof data.value === 'string' ? data.value.replace(/"/g, '') : data.value;
+        }
 
-      alert('密碼修改成功！');
-      document.getElementById('pwd-old').value = '';
-      document.getElementById('pwd-new1').value = '';
-      document.getElementById('pwd-new2').value = '';
-      closePasswordModal();
+        if (oldP !== currentDbPassword) {
+          return alert('舊密碼不正確！');
+        }
+
+        const { error: updateError } = await sb.from('settings').upsert({ key: 'admin_password', value: JSON.stringify(new1) });
+        if (updateError) {
+          return alert(`密碼修改失敗：${updateError.message}`);
+        }
+
+        alert('密碼修改成功！');
+        document.getElementById('pwd-old').value = '';
+        document.getElementById('pwd-new1').value = '';
+        document.getElementById('pwd-new2').value = '';
+        closePasswordModal();
+      } catch (err) {
+        console.error('修改密碼發生異常:', err);
+        alert('密碼修改失敗，請檢查網路連線或系統設定！');
+      }
     }
 
     // ---------- Excel 菜單上傳 ----------
@@ -858,7 +859,7 @@
       reader.readAsArrayBuffer(file);
     }
 
-    // ---------- 歷史菜單：可搜尋 Combobox ----------
+    // ---------- 歷史菜單 ----------
     async function fetchHistoryMenus() {
       const { data } = await sb.from('menus').select('id, name');
       historyMenus = data || [];
@@ -908,7 +909,7 @@
       alert('菜單已刪除！');
     }
 
-    // ---------- 外送資訊 (LocalStorage) ----------
+    // ---------- 外送資訊 ----------
     function loadDeliveryInfo() {
       const now = new Date();
       const dateStr = `${now.getMonth()+1}/${now.getDate()} 上午11點30分`;
