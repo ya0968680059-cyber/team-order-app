@@ -976,7 +976,7 @@
       localStorage.setItem('info_time', document.getElementById('info-time').value);
     }
 
-    // ---------- 統計 / 明細整理 ----------
+    // ---------- 統計 / 明細整理 (已加入同類型品項按序排列邏輯) ----------
     function getCategoryMap() {
       const map = {};
       currentMenuData.forEach(i => { map[i.name] = i.category || guessCategory(i.name); });
@@ -1017,7 +1017,13 @@
       document.getElementById('stat-est-total').innerText = `$${totalAmount}`;
 
       const box = document.getElementById('summary-items-box');
-      let html = Object.keys(summary).map(k => `<div class="text-slate-700">• <strong>${k}</strong> x ${summary[k]}</div>`).join('') || '<p class="text-slate-400">尚無統計資料</p>';
+      
+      // 將區塊二的明細排序：先依主餐名稱字串排序，若主餐名稱相同，則依其規格或備註（如大小盛等）排序，避免雜亂無章
+      const sortedKeys = Object.keys(summary).sort((a, b) => {
+        return a.localeCompare(b, 'zh-Hant');
+      });
+
+      let html = sortedKeys.map(k => `<div class="text-slate-700">• <strong>${k}</strong> x ${summary[k]}</div>`).join('') || '<p class="text-slate-400">尚無統計資料</p>';
 
       if (specialNotes.length > 0) {
         html += `<div class="mt-3 p-2.5 bg-amber-100 text-amber-900 rounded-lg border border-amber-200 text-xs space-y-1">
@@ -1033,34 +1039,23 @@
     function copyLineMessage() {
       const { summary, specialNotes, totalAmount } = computeSummary();
 
-      let text = `【團購訂餐報餐明細】
-`;
-      text += `訂購單位：${document.getElementById('info-unit').value}
-`;
-      text += `外送地址：${document.getElementById('info-address').value}
-`;
-      text += `聯絡電話：${document.getElementById('info-phone').value}
-`;
-      text += `訂購人：${document.getElementById('info-contact').value}
-`;
-      text += `外送時間：${document.getElementById('info-time').value}
-`;
-      text += `------------------------
-`;
+      let text = `【團購訂餐報餐明細】\n`;
+      text += `訂購單位：${document.getElementById('info-unit').value}\n`;
+      text += `外送地址：${document.getElementById('info-address').value}\n`;
+      text += `聯絡電話：${document.getElementById('info-phone').value}\n`;
+      text += `訂購人：${document.getElementById('info-contact').value}\n`;
+      text += `外送時間：${document.getElementById('info-time').value}\n`;
+      text += `------------------------\n`;
 
-      Object.keys(summary).forEach(k => text += `${k} x ${summary[k]}
-`);
+      const sortedKeys = Object.keys(summary).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+      sortedKeys.forEach(k => text += `${k} x ${summary[k]}\n`);
 
       if (specialNotes.length > 0) {
-        text += `------------------------
-⚠️ 特殊備註：
-`;
-        specialNotes.forEach(n => text += `${n}
-`);
+        text += `------------------------\n⚠️ 特殊備註：\n`;
+        specialNotes.forEach(n => text += `${n}\n`);
       }
 
-      text += `------------------------
-總金額：$${totalAmount} 元`;
+      text += `------------------------\n總金額：$${totalAmount} 元`;
 
       navigator.clipboard.writeText(text);
       alert('📋 已成功將 Line 報餐訊息複製至剪貼簿！');
@@ -1102,7 +1097,6 @@
           const changeVal = localStorage.getItem(`order_change_${o.id}`);
           const receivedVal = localStorage.getItem(`order_received_${o.id}`);
           
-          // 只有當已付款且找零金額大於 0 時才顯示找零提示
           const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
           const changeBadge = (o.is_paid && changeNum > 0) ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded text-xs font-bold">找零 $${changeVal} (收$${receivedVal})</span>` : '';
 
@@ -1153,20 +1147,16 @@
 
     async function togglePaid(id) {
       const order = allOrders.find(o => String(o.id) === String(id));
-      if (!order) { console.error('togglePaid: 找不到訂單，id=', id, 'allOrders ids=', allOrders.map(o=>o.id)); alert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); return; }
+      if (!order) { alert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); return; }
 
-      // 如果本來是未付款，按下去時加入找零計算功能
       if (!order.is_paid) {
-        const input = prompt(`【現場找錢計算機】
-應付金額：$${order.total_price} 元
-請輸入實收金額（例如 500 或 1000）：`, order.total_price);
-        if (input === null) return; // 點選取消則不變動
+        const input = prompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元\n請輸入實收金額（例如 500 或 1000）：`, order.total_price);
+        if (input === null) return;
         const received = parseInt(input);
         if (isNaN(received)) return alert('請輸入有效的數字金額！');
         if (received < order.total_price) return alert('實收金額小於應付金額！');
         const change = received - order.total_price;
         
-        // 記錄找零資訊到 localStorage 供畫面長久顯示
         localStorage.setItem(`order_change_${id}`, change);
         localStorage.setItem(`order_received_${id}`, received);
 
@@ -1176,12 +1166,10 @@
           alert(`💡 剛好付清，無需找零！\n（確認後將標記為已付款）`);
         }
       } else {
-        // 取消已付款狀態時，清除找零紀錄
         localStorage.removeItem(`order_change_${id}`);
         localStorage.removeItem(`order_received_${id}`);
       }
 
-      // 切換付款狀態（已付款 <-> 未付款）並同步更新到資料庫
       const newPaidStatus = !order.is_paid;
       const { error } = await sb.from('orders').update({ is_paid: newPaidStatus }).eq('id', id);
       
@@ -1207,7 +1195,7 @@
     // ---------- 訂單修改彈窗 ----------
     function openEditModal(id) {
       const order = allOrders.find(o => String(o.id) === String(id));
-      if (!order) { console.error('openEditModal: 找不到訂單，id=', id, 'allOrders ids=', allOrders.map(o=>o.id)); alert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); return; }
+      if (!order) { alert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); return; }
       editingOrderId = id;
       editingItems = mergeCartItems(JSON.parse(JSON.stringify(order.items)));
 
@@ -1306,7 +1294,7 @@
         const worksheet = XLSX.utils.json_to_sheet(rows);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "按餐點發放");
-        XLSX.writeFile(workbook, `團購訂單_按餐點發放_${new Date().toISOString().slice(0,10)}.xlsx`);
+        XLSX.writeFile(workbook, `團購訂單_按餐點發放_${new Date().toISOString().slice(0,10)}.toISOString().slice(0,10)}.xlsx`);
       }
     }
 
