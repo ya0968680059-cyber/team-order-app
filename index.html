@@ -48,7 +48,7 @@
       <!-- 1. 姓名認領區 -->
       <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
         <h2 class="text-lg font-bold text-slate-800 mb-3 border-b pb-2">1. 請輸入訂購人姓名（輸入分機+姓名）</h2>
-        <input type="text" id="user-name-input" oninput="debounceHandleUserNameChange()" placeholder="請輸入分機與姓名（例如：312 煒唐）" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none transition">
+        <input type="text" id="user-name-input" oninput="debounceHandleUserNameChange()" placeholder="請輸入分機與姓名（例如：309 梓恩）" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none transition">
       </div>
 
       <!-- 2. 可搜尋下拉式菜單與點餐區 -->
@@ -627,16 +627,23 @@
       renderCart();
     }
 
+    // 當輸入姓名改變時，若對應到歷史訂單則帶入，若無對應則自動清空購物車，避免跨人混淆
     function debounceHandleUserNameChange() {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
         const name = document.getElementById('user-name-input').value.trim();
-        if (!name) return;
+        if (!name) {
+          userCart = [];
+          renderCart();
+          return;
+        }
         const existingOrder = allOrders.find(o => o.user_name === name);
         if (existingOrder) {
           userCart = existingOrder.items.map(i => ({ ...i }));
-          renderCart();
+        } else {
+          userCart = [];
         }
+        renderCart();
       }, 400);
     }
 
@@ -877,10 +884,10 @@
     function loadDeliveryInfo() {
       const now = new Date();
       const dateStr = `${now.getMonth()+1}/${now.getDate()} 上午11點30分`;
-      document.getElementById('info-unit').value = localStorage.getItem('info_unit') || '經濟部產業園區管理局';
-      document.getElementById('info-address').value = localStorage.getItem('info_address') || '高雄市楠梓區加昌路600號';
-      document.getElementById('info-phone').value = localStorage.getItem('info_phone') || '(07)361-1212#309';
-      document.getElementById('info-contact').value = localStorage.getItem('info_contact') || '徐先生';
+      document.getElementById('info-unit').value = localStorage.getItem('info_unit') || '';
+      document.getElementById('info-address').value = localStorage.getItem('info_address') || '';
+      document.getElementById('info-phone').value = localStorage.getItem('info_phone') || '';
+      document.getElementById('info-contact').value = localStorage.getItem('info_contact') || '';
       document.getElementById('info-time').value = localStorage.getItem('info_time') || dateStr;
     }
 
