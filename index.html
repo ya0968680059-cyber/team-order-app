@@ -48,17 +48,17 @@
       <!-- 1. 姓名認領區 -->
       <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
         <h2 class="text-lg font-bold text-slate-800 mb-3 border-b pb-2">1. 請輸入訂購人姓名（輸入分機+姓名）</h2>
-        <input type="text" id="user-name-input" oninput="debounceHandleUserNameChange()" placeholder="請輸入分機與姓名（例如：309 梓恩）" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none transition">
+        <input type="text" id="user-name-input" oninput="debounceHandleUserNameChange()" placeholder="例如：309梓恩" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none transition">
       </div>
 
       <!-- 2. 可搜尋下拉式菜單與點餐區 -->
       <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
-        <h2 class="text-lg font-bold text-slate-800 border-b pb-2">2. 選擇餐點與客製化規格</h2>
+        <h2 class="text-lg font-bold text-slate-800 border-b pb-2">2. 選擇餐點</h2>
         
         <!-- 可搜尋下拉選單組合元件 -->
         <div class="relative">
           <label class="block text-xs font-bold text-slate-600 mb-1">🔍 選擇或搜尋品項：</label>
-          <input type="text" id="search-menu-input" autocomplete="off" oninput="renderMenuDropdown()" onfocus="renderMenuDropdown()" placeholder="請點擊選擇或輸入關鍵字搜尋（如：排骨、紅茶）..." class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white transition">
+          <input type="text" id="search-menu-input" autocomplete="off" oninput="handleSearchInput()" onfocus="renderMenuDropdown()" placeholder="請點擊選擇或輸入關鍵字搜尋（如：排骨、紅茶）..." class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white transition">
           
           <!-- 下拉選單選單浮層 -->
           <div id="menu-dropdown-list" class="hidden absolute z-30 bg-white border border-slate-200 rounded-lg shadow-xl mt-1 max-h-60 overflow-y-auto w-full"></div>
@@ -409,6 +409,17 @@
       renderPrintTable();
     }
 
+    // 處理搜尋輸入與清空點購狀態
+    function handleSearchInput() {
+      const inputVal = document.getElementById('search-menu-input').value.trim();
+      if (!inputVal) {
+        // 如果「選擇或搜尋品項」已經清空，「正在點購：」也清空隱藏
+        document.getElementById('selected-item-panel').classList.add('hidden');
+        selectedMenuIndex = null;
+      }
+      renderMenuDropdown();
+    }
+
     // 渲染下拉選單項目
     function renderMenuDropdown() {
       const dropdown = document.getElementById('menu-dropdown-list');
@@ -429,7 +440,7 @@
         dropdown.innerHTML = filtered.map(({ item, origIdx }) => `
           <div onclick="selectMenuItem(${origIdx})" class="p-3 text-sm hover:bg-blue-50 cursor-pointer border-b last:border-b-0 border-slate-100 flex justify-between items-center transition">
             <span class="font-bold text-slate-800">${item.name}</span>
-            <span class="text-xs font-extrabold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">$${item.price} 起</span>
+            <span class="text-xs font-extrabold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">$${item.price}</span>
           </div>
         `).join('');
       }
@@ -452,7 +463,7 @@
       panel.innerHTML = `
         <div class="flex justify-between items-center border-b pb-2">
           <span class="font-bold text-base text-slate-800">🛒 正在點購：${item.name}</span>
-          <span class="text-sm font-extrabold text-rose-600">$${item.price} 起</span>
+          <span class="text-sm font-extrabold text-rose-600">$${item.price}</span>
         </div>
 
         <!-- 動態規格 (單選) -->
@@ -487,7 +498,7 @@
 
         <!-- 備註與前台數量選擇 [ - ] 1 [ + ] & 即時小計 -->
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-1">
-          <input type="text" id="note-${origIdx}" placeholder="飲食備註 (如: 飯少/大辣/去冰)" class="border border-slate-300 text-xs p-2 rounded-lg w-full sm:w-56 outline-none bg-white">
+          <input type="text" id="note-${origIdx}" placeholder="其他備註" class="border border-slate-300 text-xs p-2 rounded-lg w-full sm:w-56 outline-none bg-white">
 
           <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
             <!-- 前台數量選擇按鈕區 -->
@@ -1100,7 +1111,7 @@
           <div class="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-200">
             <div>
               <div class="font-bold text-slate-800">${item.name}</div>
-              <input type="text" value="${item.note || ''}" onchange="editingItems[${idx}].note=this.value" placeholder="客製化備註/辣度" class="text-xs border border-slate-300 rounded p-1 mt-1 w-40 outline-none">
+              <input type="text" value="${item.note || ''}" onchange="editingItems[${idx}].note=this.value" placeholder="其他備註" class="text-xs border border-slate-300 rounded p-1 mt-1 w-40 outline-none">
             </div>
             <div class="flex items-center gap-2">
               <input type="number" min="1" value="${item.qty}" onchange="editingItems[${idx}].qty=parseInt(this.value)||1;renderModalItems();" class="w-12 border border-slate-300 rounded text-center p-1 font-semibold text-xs">
