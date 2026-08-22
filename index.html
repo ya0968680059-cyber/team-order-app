@@ -1101,7 +1101,10 @@
           const sortedItems = mergeCartItems(o.items || []);
           const changeVal = localStorage.getItem(`order_change_${o.id}`);
           const receivedVal = localStorage.getItem(`order_received_${o.id}`);
-          const changeBadge = (o.is_paid && changeVal !== null) ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded text-xs font-bold">找零 $${changeVal} (收$${receivedVal})</span>` : '';
+          
+          // 只有當已付款且找零金額大於 0 時才顯示找零提示
+          const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
+          const changeBadge = (o.is_paid && changeNum > 0) ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded text-xs font-bold">找零 $${changeVal} (收$${receivedVal})</span>` : '';
 
           return `
             <div class="flex flex-wrap justify-between items-center p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
@@ -1167,8 +1170,11 @@
         localStorage.setItem(`order_change_${id}`, change);
         localStorage.setItem(`order_received_${id}`, received);
 
-        alert(`💡 找零金額：$${change} 元
-（確認後將標記為已付款）`);
+        if (change > 0) {
+          alert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
+        } else {
+          alert(`💡 剛好付清，無需找零！\n（確認後將標記為已付款）`);
+        }
       } else {
         // 取消已付款狀態時，清除找零紀錄
         localStorage.removeItem(`order_change_${id}`);
@@ -1269,11 +1275,13 @@
       if (viewMode === 'person') {
         const rows = allOrders.map(o => {
           const changeVal = localStorage.getItem(`order_change_${o.id}`);
+          const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
+          const paymentStatusText = o.is_paid ? (changeNum > 0 ? `已付款 (找零$${changeVal})` : '已付款') : '未付款';
           return {
             '姓名': o.user_name,
             '訂購明細': mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('; '),
             '總金額': o.total_price,
-            '付款狀態': o.is_paid ? (changeVal !== null ? `已付款 (找零$${changeVal})` : '已付款') : '未付款',
+            '付款狀態': paymentStatusText,
             '核對簽名欄': ''
           };
         });
@@ -1318,7 +1326,8 @@
         `;
         tbody.innerHTML = allOrders.map(o => {
           const changeVal = localStorage.getItem(`order_change_${o.id}`);
-          const statusText = o.is_paid ? (changeVal !== null ? `已付 (找$${changeVal})` : '已付') : '未付';
+          const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
+          const statusText = o.is_paid ? (changeNum > 0 ? `已付 (找$${changeVal})` : '已付') : '未付';
           return `
             <tr>
               <td class="border border-black p-2 text-center">☐</td>
@@ -1332,7 +1341,7 @@
       } else {
         titleEle.innerText = '團購餐點發放清單（按餐點發放）';
         headerEle.innerHTML = `
-          <th class="border border-black p-2 text-center w-12">點收</th>
+          <th class="border border-black p-2 text-center w-12">点收</th>
           <th class="border border-black p-2 w-64">餐點品項與規格</th>
           <th class="border border-black p-2 text-center w-20">總份數</th>
           <th class="border border-black p-2">各訂購人與數量</th>
