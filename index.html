@@ -605,24 +605,46 @@
       }, 400);
     }
 
+    // 送出訂單（修復資料庫寫入與錯誤捕捉）
     async function submitOrder() {
       if (!isOrderingOpen) return alert('本次團購已結單！');
       const name = document.getElementById('user-name-input').value.trim();
       if (!name) return alert('請先輸入訂購人姓名！');
       if (userCart.length === 0) return alert('購物車是空的！');
 
-      let total = 0;
-      userCart.forEach(i => total += i.price * i.qty);
+      const submitBtn = document.getElementById('submit-order-btn');
+      submitBtn.disabled = true;
+      submitBtn.innerText = '⏳ 訂單傳送中...';
 
-      const existingOrder = allOrders.find(o => o.user_name === name);
-      if (existingOrder) {
-        await sb.from('orders').update({ items: userCart, total_price: total }).eq('id', existingOrder.id);
-      } else {
-        await sb.from('orders').insert({ user_name: name, items: userCart, total_price: total, is_paid: false, group_id: currentGroupId });
+      try {
+        let total = 0;
+        userCart.forEach(i => total += i.price * i.qty);
+
+        const existingOrder = allOrders.find(o => o.user_name === name);
+        let error = null;
+
+        if (existingOrder) {
+          const res = await sb.from('orders').update({ items: userCart, total_price: total }).eq('id', existingOrder.id);
+          error = res.error;
+        } else {
+          const res = await sb.from('orders').insert([{ user_name: name, items: userCart, total_price: total, is_paid: false, group_id: currentGroupId }]);
+          error = res.error;
+        }
+
+        if (error) {
+          console.error('Supabase 寫入失敗:', error);
+          alert(`❌ 訂單送出失敗：${error.message || '請確認資料庫權限或網路連線！'}`);
+        } else {
+          alert(`🎉 訂購成功！${name} 應付 $${total} 元`);
+          await fetchOrders();
+        }
+      } catch (err) {
+        console.error('送出訂單發生例外:', err);
+        alert('❌ 送出失敗，請稍後再試！');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerText = '🚀 確認送出訂單';
       }
-
-      alert(`🎉 訂購成功！${name} 應付 $${total} 元`);
-      await fetchOrders();
     }
 
     // ---------- 管理者登入 / 密碼 (相容舊版預設密碼與 RPC) ----------
