@@ -6,132 +6,564 @@
   <title>團隊團購點餐系統</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    @media print {
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      body { background: white; color: black; }
+    }
+    .print-only { display: none; }
+  </style>
 </head>
 <body class="bg-slate-100 text-slate-800 font-sans min-h-screen">
-  <div id="app" class="max-w-md mx-auto p-4 pb-24">
-    <!-- 標頭區 -->
-    <header class="bg-white p-4 rounded-xl shadow-sm mb-4 text-center border border-slate-200">
-      <h1 class="text-xl font-bold text-slate-900">🍔 團隊團購訂餐系統</h1>
-      <p id="cutoff-info" class="text-sm text-slate-500 mt-1">載入中...</p>
-    </header>
 
-    <!-- 訂購人姓名 -->
-    <div class="bg-white p-4 rounded-xl shadow-sm mb-4 border border-slate-200">
-      <label class="block text-sm font-semibold mb-2">訂購人姓名</label>
-      <input type="text" id="user-name" placeholder="請輸入姓名..." class="w-full border border-slate-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-    </div>
-
-    <!-- 菜單列表區 -->
-    <main class="bg-white p-4 rounded-xl shadow-sm mb-4 border border-slate-200">
-      <h2 class="text-lg font-bold mb-3 border-b pb-2">📋 今日菜單</h2>
-      <div id="menu-list" class="space-y-3">
-        <p class="text-slate-400 text-center py-4">菜單載入中...</p>
-      </div>
-    </main>
-
-    <!-- 購物車底部固定區 -->
-    <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-200 p-4 shadow-lg flex justify-between items-center">
+  <!-- 頂部導覽列 -->
+  <header class="bg-blue-600 text-white p-4 shadow-md no-print sticky top-0 z-50">
+    <div class="max-w-4xl mx-auto flex justify-between items-center">
       <div>
-        <span class="text-xs text-slate-500">已選品項</span>
-        <div id="total-price" class="text-lg font-bold text-red-600">NT$ 0</div>
+        <h1 id="app-title" class="text-xl font-bold">🍔 團隊團購點餐系統</h1>
+        <p id="broadcast-bar" class="text-xs text-blue-100 mt-0.5">📢 預載入中...</p>
       </div>
-      <button onclick="submitOrder()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold shadow">送出訂單</button>
+      <button onclick="toggleAdminModal()" class="bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg text-sm font-semibold transition">
+        ⚙️ 團主後台
+      </button>
     </div>
-  </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto p-4 space-y-6">
+
+    <!-- 前台：同事點餐區 -->
+    <section id="user-section" class="space-y-4 no-print">
+      <!-- 姓名認領區 -->
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <label class="block text-sm font-bold text-slate-700 mb-1">1. 輸入訂購人姓名（自動載入舊紀錄）</label>
+        <input type="text" id="user-name-input" oninput="debounceHandleUserNameChange()" placeholder="請輸入您的姓名（如：張小明）" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none">
+      </div>
+
+      <!-- 菜單點餐區 -->
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-4">
+        <div class="flex justify-between items-center border-b pb-2">
+          <h2 class="text-lg font-bold">2. 選擇餐點</h2>
+          <input type="text" id="search-menu-input" oninput="renderMenuList()" placeholder="🔍 關鍵字搜尋餐點..." class="border border-slate-300 text-sm rounded-lg p-1.5 outline-none">
+        </div>
+        <div id="user-menu-container" class="space-y-3 max-h-96 overflow-y-auto pr-1">
+          <p class="text-slate-400 text-center py-6">載入菜單中...</p>
+        </div>
+      </div>
+
+      <!-- 個人購物車與送出 -->
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3">
+        <h3 class="text-base font-bold border-b pb-2">🛒 我的購物車明細</h3>
+        <div id="cart-list" class="space-y-2 text-sm text-slate-600">
+          <p class="text-slate-400">購物車目前是空的</p>
+        </div>
+        <div class="flex justify-between items-center pt-2 border-t">
+          <div class="text-lg font-bold">總計：<span id="cart-total-price" class="text-red-600">NT$ 0</span></div>
+          <button id="submit-order-btn" onclick="submitOrder()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-2.5 rounded-xl shadow transition">
+            🚀 送出訂單
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 後台：管理者控制台 (預設隱藏) -->
+    <section id="admin-section" class="hidden space-y-6 no-print">
+      <div class="bg-amber-50 border border-amber-200 p-4 rounded-xl flex justify-between items-center">
+        <span class="font-bold text-amber-900">🔐 管理者權限已解鎖</span>
+        <button onclick="closeAdmin()" class="text-sm bg-amber-200 hover:bg-amber-300 px-3 py-1 rounded-lg">退出後台</button>
+      </div>
+
+      <!-- 區塊一：團購控制台 -->
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
+        <h2 class="text-lg font-bold border-b pb-2">⚙️ 區塊一：團購控制台</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm text-slate-500 mb-1">當前狀態：<span id="status-badge" class="font-bold">🟢 開放點餐中</span></p>
+            <div class="flex gap-2">
+              <button onclick="toggleOrderStatus(false)" class="bg-rose-600 hover:bg-rose-700 text-white text-sm px-3 py-1.5 rounded-lg">🔴 暫停接單 (一鍵結單)</button>
+              <button onclick="toggleOrderStatus(true)" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm px-3 py-1.5 rounded-lg">🟢 恢復接單</button>
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm text-slate-500 mb-1">預計結單時間設定</label>
+            <div class="flex gap-2">
+              <input type="text" id="cutoff-time-input" placeholder="例如：09:00" class="border p-1.5 rounded-lg text-sm w-32">
+              <button onclick="saveCutoffTime()" class="bg-slate-800 text-white text-sm px-3 py-1.5 rounded-lg">儲存時間</button>
+            </div>
+          </div>
+        </div>
+        <div class="pt-2 border-t flex flex-wrap gap-2">
+          <button onclick="startNewGroup()" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold px-4 py-2 rounded-lg">🧹 清空目前訂單 / 開啟新一團</button>
+          <button onclick="openChangePasswordModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-bold px-4 py-2 rounded-lg">🔑 修改管理密碼</button>
+        </div>
+
+        <!-- 菜單管理 -->
+        <div class="pt-4 border-t space-y-3">
+          <p class="font-bold text-sm">📁 菜單管理 (目前啟用：<span id="active-menu-name" class="text-blue-600">無</span>)</p>
+          <div class="flex flex-col md:flex-row gap-3 items-start md:items-center">
+            <input type="file" id="excel-file-input" accept=".xlsx, .xls" class="text-sm">
+            <button onclick="uploadExcelMenu()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-3 py-1.5 rounded-lg">上傳 Excel 菜單</button>
+          </div>
+          <div class="flex gap-2 items-center pt-2">
+            <select id="history-menu-select" class="border p-1.5 rounded-lg text-sm flex-1"></select>
+            <button onclick="switchMenu()" class="bg-emerald-600 text-white text-sm px-3 py-1.5 rounded-lg">🟢 啟用此菜單</button>
+            <button onclick="deleteMenu()" class="bg-rose-600 text-white text-sm px-3 py-1.5 rounded-lg">🗑️ 刪除菜單</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 區塊二：明細整理區（店家訂餐） -->
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
+        <h2 class="text-lg font-bold border-b pb-2">📋 區塊二：明細整理區（店家報餐）</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+          <div><label class="text-xs text-slate-400">訂購單位</label><input type="text" id="info-unit" oninput="saveDeliveryInfo()" class="w-full border p-1 rounded"></div>
+          <div><label class="text-xs text-slate-400">外送地址</label><input type="text" id="info-address" oninput="saveDeliveryInfo()" class="w-full border p-1 rounded"></div>
+          <div><label class="text-xs text-slate-400">聯絡電話</label><input type="text" id="info-phone" oninput="saveDeliveryInfo()" class="w-full border p-1 rounded"></div>
+          <div><label class="text-xs text-slate-400">訂購人</label><input type="text" id="info-contact" oninput="saveDeliveryInfo()" class="w-full border p-1 rounded"></div>
+        </div>
+        <div id="summary-items-box" class="bg-slate-50 p-3 rounded-lg text-sm space-y-1">
+          <p class="text-slate-400">尚無統計資料</p>
+        </div>
+        <button onclick="copyLineMessage()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-lg shadow">
+          📋 一鍵複製 Line 報餐訊息
+        </button>
+      </div>
+
+      <!-- 區塊三：收錢統計區 -->
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
+        <div class="flex justify-between items-center border-b pb-2">
+          <h2 class="text-lg font-bold">💰 區塊三：收錢與現場對帳區</h2>
+          <div class="flex gap-2 text-sm">
+            <button onclick="switchViewMode('person')" id="btn-view-person" class="bg-blue-600 text-white px-3 py-1 rounded-lg">按個人對帳</button>
+            <button onclick="switchViewMode('item')" id="btn-view-item" class="bg-slate-200 text-slate-700 px-3 py-1 rounded-lg">按餐點發放</button>
+          </div>
+        </div>
+
+        <!-- 看板統計 -->
+        <div class="grid grid-cols-3 gap-2 text-center bg-slate-50 p-3 rounded-lg font-bold text-sm">
+          <div>總額：<span id="stat-total" class="text-blue-600">$0</span></div>
+          <div>已收：<span id="stat-paid" class="text-emerald-600">$0</span></div>
+          <div>未收：<span id="stat-unpaid" class="text-rose-600">$0</span></div>
+        </div>
+
+        <!-- 工具列 -->
+        <div class="flex justify-between gap-2 no-print">
+          <input type="text" id="filter-name-input" oninput="renderOrdersSection()" placeholder="🔍 搜尋姓名..." class="border text-sm p-1.5 rounded-lg">
+          <div class="flex gap-2">
+            <button onclick="exportExcel()" class="bg-slate-700 text-white text-sm px-3 py-1.5 rounded-lg">📥 匯出 Excel</button>
+            <button onclick="window.print()" class="bg-slate-700 text-white text-sm px-3 py-1.5 rounded-lg">🖨️ 列印劃單</button>
+          </div>
+        </div>
+
+        <!-- 訂單渲染容器 -->
+        <div id="orders-container" class="space-y-2"></div>
+      </div>
+    </section>
+
+    <!-- 列印專用極簡 A4 表格 -->
+    <div class="print-only">
+      <h1 class="text-2xl font-bold mb-4">團購訂餐現場發餐劃單表</h1>
+      <table class="w-full border-collapse border border-black text-left text-sm">
+        <thead>
+          <tr class="bg-slate-200">
+            <th class="border border-black p-2">核對</th>
+            <th class="border border-black p-2">姓名</th>
+            <th class="border border-black p-2">訂購餐點明細</th>
+            <th class="border border-black p-2">金額</th>
+            <th class="border border-black p-2">付款狀態</th>
+          </tr>
+        </thead>
+        <tbody id="print-table-body"></tbody>
+      </table>
+    </div>
+  </main>
 
   <script>
-    // Supabase 設定由 Vercel 環境變數自動讀取
+    // Supabase 初始化
     const SUPABASE_URL = "https://imuyohxrtyarclgzrole.supabase.co";
     const SUPABASE_KEY = "sb_publishable_Qv7AV8g5EhjVnT795Qm-qA_ZuJK772Y";
     const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    let currentMenu = [];
-    let cart = {};
+    let currentMenuData = [];
+    let currentActiveMenuId = null;
+    let allOrders = [];
+    let isOrderingOpen = true;
+    let userCart = {};
+    let debounceTimer = null;
+    let viewMode = 'person';
 
+    // 初始化
     async function init() {
-      // 讀取系統設定
-      const { data: settings } = await supabase.from('settings').select('*');
-      if (settings) {
-        const cutoff = settings.find(s => s.key === 'cutoff_time');
-        if (cutoff) document.getElementById('cutoff-info').innerText = `結單時間：${cutoff.value.replace(/"/g, '')}`;
-      }
+      loadDeliveryInfo();
+      await fetchSettings();
+      await fetchActiveMenu();
+      await fetchOrders();
+      
+      // 防暫停 14 天 Ping 機制 (每 5 分鐘自動背景發送請求)
+      setInterval(() => { supabase.from('settings').select('key').limit(1); }, 300000);
+    }
 
-      // 讀取菜單
-      const { data: menus } = await supabase.from('menus').select('*').eq('is_active', true).limit(1);
-      if (menus && menus.length > 0) {
-        currentMenu = menus[0].data || [];
-        renderMenu();
-      } else {
-        document.getElementById('menu-list').innerHTML = `<p class="text-slate-400 text-center py-4">目前尚無上架菜單</p>`;
+    async function fetchSettings() {
+      const { data } = await supabase.from('settings').select('*');
+      if (data) {
+        const cutoff = data.find(s => s.key === 'cutoff_time');
+        const status = data.find(s => s.key === 'is_active');
+        if (cutoff) {
+          document.getElementById('cutoff-time-input').value = cutoff.value.replace(/"/g, '');
+          document.getElementById('broadcast-bar').innerText = `📢 預計 ${cutoff.value.replace(/"/g, '')} 結單，請儘速下單！`;
+        }
+        if (status) {
+          isOrderingOpen = status.value === 'true' || status.value === true;
+          document.getElementById('status-badge').innerText = isOrderingOpen ? '🟢 開放點餐中' : '🔴 已結單';
+        }
       }
     }
 
-    function renderMenu() {
-      const container = document.getElementById('menu-list');
-      if (currentMenu.length === 0) {
-        container.innerHTML = `<p class="text-slate-400 text-center py-4">菜單是空的</p>`;
-        return;
+    async function fetchActiveMenu() {
+      const { data } = await supabase.from('menus').select('*').eq('is_active', true).limit(1);
+      if (data && data.length > 0) {
+        currentActiveMenuId = data[0].id;
+        currentMenuData = data[0].data || [];
+        document.getElementById('app-title').innerText = `🍔 ${data[0].name}`;
+        document.getElementById('active-menu-name').innerText = data[0].name;
+      } else {
+        document.getElementById('app-title').innerText = `🍔 團隊團購點餐系統`;
+        document.getElementById('user-menu-container').innerHTML = `<p class="text-slate-400 text-center py-6">目前無上架菜單</p>`;
       }
-      container.innerHTML = currentMenu.map((item, idx) => `
-        <div class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-lg border-b border-slate-100">
+      renderMenuList();
+      fetchHistoryMenus();
+    }
+
+    async function fetchOrders() {
+      const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+      allOrders = data || [];
+      renderOrdersSection();
+      renderSummarySection();
+      renderPrintTable();
+    }
+
+    function renderMenuList() {
+      const container = document.getElementById('user-menu-container');
+      const keyword = document.getElementById('search-menu-input').value.trim().toLowerCase();
+      if (!currentMenuData.length) return;
+
+      const filtered = currentMenuData.filter(i => i.name.toLowerCase().includes(keyword));
+      container.innerHTML = filtered.map((item, idx) => `
+        <div class="flex justify-between items-center p-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg">
           <div>
-            <div class="font-medium">${item.name}</div>
+            <div class="font-bold">${item.name}</div>
             <div class="text-sm text-slate-500">NT$ ${item.price}</div>
           </div>
-          <div class="flex items-center space-x-2">
-            <button onclick="updateCart(${idx}, -1)" class="w-7 h-7 bg-slate-200 rounded-full font-bold">-</button>
-            <span id="qty-${idx}">${cart[idx] || 0}</span>
-            <button onclick="updateCart(${idx}, 1)" class="w-7 h-7 bg-blue-100 text-blue-600 rounded-full font-bold">+</button>
+          <div class="flex items-center gap-2">
+            <button onclick="updateCart(${idx}, -1)" class="w-8 h-8 bg-slate-200 rounded-full font-bold text-lg hover:bg-slate-300">-</button>
+            <span class="font-bold w-6 text-center">${userCart[idx] || 0}</span>
+            <button onclick="updateCart(${idx}, 1)" ${!isOrderingOpen ? 'disabled' : ''} class="w-8 h-8 bg-blue-600 text-white rounded-full font-bold text-lg hover:bg-blue-700 disabled:bg-slate-300">+</button>
           </div>
         </div>
       `).join('');
     }
 
     function updateCart(idx, change) {
-      cart[idx] = (cart[idx] || 0) + change;
-      if (cart[idx] <= 0) delete cart[idx];
-      document.getElementById(`qty-${idx}`).innerText = cart[idx] || 0;
-      calculateTotal();
+      if (!isOrderingOpen && change > 0) return alert('已結單，無法加購！');
+      userCart[idx] = (userCart[idx] || 0) + change;
+      if (userCart[idx] <= 0) delete userCart[idx];
+      renderMenuList();
+      renderCart();
     }
 
-    function calculateTotal() {
+    function renderCart() {
+      const container = document.getElementById('cart-list');
       let total = 0;
-      Object.keys(cart).forEach(idx => {
-        total += currentMenu[idx].price * cart[idx];
-      });
-      document.getElementById('total-price').innerText = `NT$ ${total}`;
+      const items = Object.keys(userCart);
+      if (items.length === 0) {
+        container.innerHTML = `<p class="text-slate-400">購物車目前是空的</p>`;
+        document.getElementById('cart-total-price').innerText = `NT$ 0`;
+        return;
+      }
+
+      container.innerHTML = items.map(idx => {
+        const item = currentMenuData[idx];
+        const subtotal = item.price * userCart[idx];
+        total += subtotal;
+        return `<div class="flex justify-between"><span>${item.name} x ${userCart[idx]}</span><span>$${subtotal}</span></div>`;
+      }).join('');
+      document.getElementById('cart-total-price').innerText = `NT$ ${total}`;
+    }
+
+    function debounceHandleUserNameChange() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        const name = document.getElementById('user-name-input').value.trim();
+        if (!name) return;
+        const existingOrder = allOrders.find(o => o.user_name === name);
+        if (existingOrder) {
+          userCart = {};
+          existingOrder.items.forEach(i => {
+            const menuIdx = currentMenuData.findIndex(m => m.name === i.name);
+            if (menuIdx !== -1) userCart[menuIdx] = i.qty;
+          });
+          renderMenuList();
+          renderCart();
+        }
+      }, 500);
     }
 
     async function submitOrder() {
-      const userName = document.getElementById('user-name').value.trim();
-      if (!userName) return alert('請先輸入您的姓名！');
+      if (!isOrderingOpen) return alert('本次團購已結單！');
+      const name = document.getElementById('user-name-input').value.trim();
+      if (!name) return alert('請先輸入訂購人姓名！');
       
-      const items = Object.keys(cart).map(idx => ({
-        name: currentMenu[idx].name,
-        price: currentMenu[idx].price,
-        qty: cart[idx]
+      const items = Object.keys(userCart).map(idx => ({
+        name: currentMenuData[idx].name,
+        price: currentMenuData[idx].price,
+        qty: userCart[idx]
       }));
-
       if (items.length === 0) return alert('購物車是空的！');
 
       let total = 0;
       items.forEach(i => total += i.price * i.qty);
 
-      const { error } = await supabase.from('orders').insert({
-        user_name: userName,
-        items: items,
-        total_price: total
+      const existingOrder = allOrders.find(o => o.user_name === name);
+      if (existingOrder) {
+        await supabase.from('orders').update({ items, total_price: total }).eq('id', existingOrder.id);
+      } else {
+        await supabase.from('orders').insert({ user_name: name, items, total_price: total });
+      }
+
+      alert(`🎉 訂購成功！${name} 應付 $${total} 元`);
+      await fetchOrders();
+    }
+
+    // 後台管理功能
+    function toggleAdminModal() {
+      const pwd = prompt("請輸入管理者密碼：");
+      if (pwd === "1234") {
+        document.getElementById('admin-section').classList.remove('hidden');
+        document.getElementById('user-section').classList.add('hidden');
+      } else if (pwd !== null) {
+        alert("密碼錯誤！");
+      }
+    }
+    function closeAdmin() {
+      document.getElementById('admin-section').classList.add('hidden');
+      document.getElementById('user-section').classList.remove('hidden');
+    }
+
+    async function toggleOrderStatus(status) {
+      isOrderingOpen = status;
+      await supabase.from('settings').upsert({ key: 'is_active', value: JSON.stringify(status) });
+      document.getElementById('status-badge').innerText = status ? '🟢 開放點餐中' : '🔴 已結單';
+      renderMenuList();
+    }
+
+    async function saveCutoffTime() {
+      const val = document.getElementById('cutoff-time-input').value.trim();
+      await supabase.from('settings').upsert({ key: 'cutoff_time', value: JSON.stringify(val) });
+      document.getElementById('broadcast-bar').innerText = `📢 預計 ${val} 結單，請儘速下單！`;
+      alert('結單時間更新成功！');
+    }
+
+    async function startNewGroup() {
+      if (!confirm('確定要清空目前所有訂單並開啟新一團嗎？')) return;
+      await supabase.from('orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      
+      // 自動清理超過 30 天的舊紀錄 (Supabase 自動留存控制)
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      await supabase.from('orders').delete().lt('created_at', thirtyDaysAgo);
+
+      await fetchOrders();
+      alert('舊訂單已歸檔清空！');
+    }
+
+    // Excel 菜單解析
+    function uploadExcelMenu() {
+      const fileInput = document.getElementById('excel-file-input');
+      const file = fileInput.files[0];
+      if (!file) return alert('請先選擇 Excel 檔案！');
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(firstSheet);
+
+        const menuItems = json.map(row => ({
+          name: row['品項'] || row['餐點'] || row['品名'],
+          price: parseInt(row['價格'] || row['單價'] || 0)
+        })).filter(i => i.name && i.price);
+
+        const menuName = file.name.replace(/\.[^/.]+$/, "");
+        
+        // 將其他菜單設為 false
+        await supabase.from('menus').update({ is_active: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabase.from('menus').insert({ name: menuName, data: menuItems, is_active: true });
+
+        alert(`菜單【${menuName}】上傳成功並已啟用！`);
+        await fetchActiveMenu();
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    async function fetchHistoryMenus() {
+      const { data } = await supabase.from('menus').select('id, name').order('name');
+      const select = document.getElementById('history-menu-select');
+      if (data) {
+        select.innerHTML = data.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+      }
+    }
+
+    async function switchMenu() {
+      const id = document.getElementById('history-menu-select').value;
+      if (!id) return;
+      await supabase.from('menus').update({ is_active: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('menus').update({ is_active: true }).eq('id', id);
+      await fetchActiveMenu();
+      alert('已切換菜單！');
+    }
+
+    // 外送資訊 LocalStorage
+    function loadDeliveryInfo() {
+      document.getElementById('info-unit').value = localStorage.getItem('info_unit') || '經濟部產業園區管理局';
+      document.getElementById('info-address').value = localStorage.getItem('info_address') || '高雄市楠梓區加昌路600號';
+      document.getElementById('info-phone').value = localStorage.getItem('info_phone') || '(07)361-1212#309';
+      document.getElementById('info-contact').value = localStorage.getItem('info_contact') || '徐先生';
+    }
+    function saveDeliveryInfo() {
+      localStorage.setItem('info_unit', document.getElementById('info-unit').value);
+      localStorage.setItem('info_address', document.getElementById('info-address').value);
+      localStorage.setItem('info_phone', document.getElementById('info-phone').value);
+      localStorage.setItem('info_contact', document.getElementById('info-contact').value);
+    }
+
+    // 區塊二 & 三渲染邏輯
+    function renderSummarySection() {
+      const summary = {};
+      let totalAmount = 0;
+      let totalCount = 0;
+
+      allOrders.forEach(o => {
+        totalAmount += o.total_price;
+        o.items.forEach(i => {
+          summary[i.name] = (summary[i.name] || 0) + i.qty;
+          totalCount += i.qty;
+        });
       });
 
-      if (error) {
-        alert('訂單送出失敗：' + error.message);
+      const box = document.getElementById('summary-items-box');
+      box.innerHTML = Object.keys(summary).map(k => `<div>• ${k} x ${summary[k]}</div>`).join('') || '<p class="text-slate-400">尚無資料</p>';
+      box.innerHTML += `<div class="font-bold border-t pt-1 mt-1">總計：${totalCount} 份餐點，共 $${totalAmount} 元</div>`;
+    }
+
+    function copyLineMessage() {
+      let text = `【團購訂餐報餐明細】\n`;
+      text += `訂購單位：${document.getElementById('info-unit').value}\n`;
+      text += `外送地址：${document.getElementById('info-address').value}\n`;
+      text += `聯絡電話：${document.getElementById('info-phone').value}\n`;
+      text += `訂購人：${document.getElementById('info-contact').value}\n`;
+      text += `------------------------\n`;
+      
+      const summary = {};
+      let totalAmount = 0;
+      allOrders.forEach(o => {
+        totalAmount += o.total_price;
+        o.items.forEach(i => summary[i.name] = (summary[i.name] || 0) + i.qty);
+      });
+
+      Object.keys(summary).forEach(k => text += `${k} x ${summary[k]}\n`);
+      text += `------------------------\n總金額：$${totalAmount} 元`;
+
+      navigator.clipboard.writeText(text);
+      alert('📋 已複製 Line 報餐訊息至剪貼簿！');
+    }
+
+    function switchViewMode(mode) {
+      viewMode = mode;
+      document.getElementById('btn-view-person').className = mode === 'person' ? 'bg-blue-600 text-white px-3 py-1 rounded-lg' : 'bg-slate-200 text-slate-700 px-3 py-1 rounded-lg';
+      document.getElementById('btn-view-item').className = mode === 'item' ? 'bg-blue-600 text-white px-3 py-1 rounded-lg' : 'bg-slate-200 text-slate-700 px-3 py-1 rounded-lg';
+      renderOrdersSection();
+    }
+
+    function renderOrdersSection() {
+      const container = document.getElementById('orders-container');
+      const keyword = document.getElementById('filter-name-input').value.trim().toLowerCase();
+      const filtered = allOrders.filter(o => o.user_name.toLowerCase().includes(keyword));
+
+      let total = 0, paid = 0, unpaid = 0;
+      allOrders.forEach(o => {
+        total += o.total_price;
+        if (o.is_paid) paid += o.total_price;
+        else unpaid += o.total_price;
+      });
+      document.getElementById('stat-total').innerText = `$${total}`;
+      document.getElementById('stat-paid').innerText = `$${paid}`;
+      document.getElementById('stat-unpaid').innerText = `$${unpaid}`;
+
+      if (viewMode === 'person') {
+        container.innerHTML = filtered.map(o => `
+          <div class="flex flex-wrap justify-between items-center p-2.5 border rounded-lg text-sm bg-slate-50">
+            <div class="flex items-center gap-2">
+              <button onclick="togglePaid('${o.id}', ${!o.is_paid})" class="${o.is_paid ? 'bg-emerald-600' : 'bg-rose-600'} text-white px-2 py-0.5 rounded text-xs">
+                ${o.is_paid ? '🟢 已付款' : '🔴 未付款'}
+              </button>
+              <span class="font-bold">${o.user_name}</span>
+              <span class="text-slate-500">($${o.total_price})</span>
+            </div>
+            <div class="text-xs text-slate-600">${o.items.map(i => `${i.name}x${i.qty}`).join(', ')}</div>
+            <div class="flex gap-1">
+              <button onclick="deleteOrder('${o.id}')" class="text-rose-600 hover:underline text-xs">刪除</button>
+            </div>
+          </div>
+        `).join('');
       } else {
-        alert('🎉 訂單已成功送出！');
-        cart = {};
-        renderMenu();
-        calculateTotal();
-        document.getElementById('user-name').value = '';
+        const itemGroups = {};
+        allOrders.forEach(o => {
+          o.items.forEach(i => {
+            if (!itemGroups[i.name]) itemGroups[i.name] = [];
+            itemGroups[i.name].push(`${o.user_name} x ${i.qty}`);
+          });
+        });
+        container.innerHTML = Object.keys(itemGroups).map(k => `
+          <div class="p-3 border rounded-lg bg-slate-50 text-sm">
+            <div class="font-bold text-blue-700">${k} (${itemGroups[k].length} 人次)</div>
+            <div class="text-xs text-slate-600 mt-1">${itemGroups[k].join('、 ')}</div>
+          </div>
+        `).join('');
       }
+    }
+
+    async function togglePaid(id, isPaid) {
+      if (!isPaid) {
+        const paidAmount = prompt("請輸入實收金額（計算找零）：");
+        if (paidAmount) {
+          const order = allOrders.find(o => o.id === id);
+          const change = parseInt(paidAmount) - order.total_price;
+          if (change >= 0) alert(`應找零錢：$${change} 元`);
+          else return alert("實收金額不足！");
+        }
+      }
+      await supabase.from('orders').update({ is_paid: isPaid }).eq('id', id);
+      await fetchOrders();
+    }
+
+    async function deleteOrder(id) {
+      if (!confirm('確定要刪除此筆訂單嗎？')) return;
+      await supabase.from('orders').delete().eq('id', id);
+      await fetchOrders();
+    }
+
+    function renderPrintTable() {
+      const tbody = document.getElementById('print-table-body');
+      tbody.innerHTML = allOrders.map(o => `
+        <tr>
+          <td class="border border-black p-2 text-center">☐</td>
+          <td class="border border-black p-2 font-bold">${o.user_name}</td>
+          <td class="border border-black p-2">${o.items.map(i => `${i.name} x ${i.qty}`).join(', ')}</td>
+          <td class="border border-black p-2">$${o.total_price}</td>
+          <td class="border border-black p-2">${o.is_paid ? '已付' : '未付'}</td>
+        </tr>
+      `).join('');
     }
 
     init();
