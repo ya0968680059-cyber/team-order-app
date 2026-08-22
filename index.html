@@ -588,6 +588,20 @@
       return DRINK_KEYWORDS.some(k => name.includes(k)) ? 'drink' : 'meal';
     }
 
+    // 輔助函式：整併購物車內的重複品項
+    function mergeCartItems(cart) {
+      const mergedMap = new Map();
+      cart.forEach(item => {
+        const key = `${item.name}___${item.note || ''}___${item.price}`;
+        if (mergedMap.has(key)) {
+          mergedMap.get(key).qty += item.qty;
+        } else {
+          mergedMap.set(key, { ...item });
+        }
+      });
+      return Array.from(mergedMap.values());
+    }
+
     // ---------- 購物車 ----------
     function addToCart(menuIdx) {
       if (!isOrderingOpen) return alert('已結單，停止接收新訂單！');
@@ -595,6 +609,7 @@
       if (!details) return;
 
       userCart.push(details);
+      userCart = mergeCartItems(userCart); // 加入時自動整併同名與同備註品項
       renderCart();
 
       // 清空目前搜尋與隱藏客製面板，保持介面乾淨
@@ -650,7 +665,7 @@
         }
         const existingOrder = allOrders.find(o => o.user_name === name);
         if (existingOrder) {
-          userCart = existingOrder.items.map(i => ({ ...i }));
+          userCart = mergeCartItems(existingOrder.items.map(i => ({ ...i })));
         } else {
           userCart = [];
         }
@@ -670,17 +685,19 @@
       submitBtn.innerText = '⏳ 訂單傳送中...';
 
       try {
+        // 送出前再次確保整併重複品項
+        const finalCart = mergeCartItems(userCart);
         let total = 0;
-        userCart.forEach(i => total += i.price * i.qty);
+        finalCart.forEach(i => total += i.price * i.qty);
 
         const existingOrder = allOrders.find(o => o.user_name === name);
         let error = null;
 
         if (existingOrder) {
-          const res = await sb.from('orders').update({ items: userCart, total_price: total }).eq('id', existingOrder.id);
+          const res = await sb.from('orders').update({ items: finalCart, total_price: total }).eq('id', existingOrder.id);
           error = res.error;
         } else {
-          const res = await sb.from('orders').insert([{ user_name: name, items: userCart, total_price: total, is_paid: false, group_id: currentGroupId }]);
+          const res = await sb.from('orders').insert([{ user_name: name, items: finalCart, total_price: total, is_paid: false, group_id: currentGroupId }]);
           error = res.error;
         }
 
@@ -1090,7 +1107,7 @@
       const order = allOrders.find(o => o.id === id);
       if (!order) return;
       editingOrderId = id;
-      editingItems = JSON.parse(JSON.stringify(order.items));
+      editingItems = mergeCartItems(JSON.parse(JSON.stringify(order.items)));
 
       document.getElementById('modal-user-name').innerText = order.user_name;
 
@@ -1129,6 +1146,7 @@
       const item = currentMenuData[idx];
       if (item) {
         editingItems.push({ name: item.name, price: item.price, qty: 1, note: '', category: item.category || guessCategory(item.name) });
+        editingItems = mergeCartItems(editingItems);
         renderModalItems();
       }
     }
@@ -1136,10 +1154,11 @@
     function closeEditModal() { document.getElementById('edit-order-modal').classList.add('hidden'); }
 
     async function saveEditModal() {
+      const finalEditingItems = mergeCartItems(editingItems);
       let total = 0;
-      editingItems.forEach(i => total += i.price * i.qty);
+      finalEditingItems.forEach(i => total += i.price * i.qty);
 
-      await sb.from('orders').update({ items: editingItems, total_price: total }).eq('id', editingOrderId);
+      await sb.from('orders').update({ items: finalEditingItems, total_price: total }).eq('id', editingOrderId);
       closeEditModal();
       await fetchOrders();
     }
