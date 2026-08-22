@@ -996,13 +996,20 @@
       XLSX.writeFile(workbook, `${data.name}_菜單.xlsx`);
     }
 
-    // ---------- 外送資訊 (已設定預設資料) ----------
+    // ---------- 外送資訊 (已設定預設資料與動態日期) ----------
+    function getTodayFormattedTime() {
+      const now = new Date();
+      const month = now.getMonth() + 1;
+      const day = now.getDate();
+      return `${month}/${day} 上午11點30分`;
+    }
+
     function loadDeliveryInfo() {
       document.getElementById('info-unit').value = localStorage.getItem('info_unit') || '經濟部產業園區管理局';
       document.getElementById('info-address').value = localStorage.getItem('info_address') || '高雄市楠梓區加昌路600號';
       document.getElementById('info-phone').value = localStorage.getItem('info_phone') || '(07)361-1212#309';
       document.getElementById('info-contact').value = localStorage.getItem('info_contact') || '徐梓恩';
-      document.getElementById('info-time').value = localStorage.getItem('info_time') || '8/23 上午11點30分';
+      document.getElementById('info-time').value = localStorage.getItem('info_time') || getTodayFormattedTime();
     }
 
     function saveDeliveryInfo() {
