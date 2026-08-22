@@ -139,12 +139,11 @@
         </div>
       </div>
 
-      <!-- 【區塊二：明細整理區（店家報餐）】 -->
+      <!-- 【區塊二：明細整理區】 -->
       <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-2 gap-2">
-          <h2 class="text-lg font-bold text-slate-800">📋 區塊二：明細整理區（店家報餐）</h2>
+          <h2 class="text-lg font-bold text-slate-800">📋 區塊二：明細整理區</h2>
           <div class="flex items-center gap-2">
-            <span class="text-xs font-semibold text-slate-500">檢視切換：</span>
             <div class="flex gap-1 text-sm bg-slate-100 p-1 rounded-lg">
               <button onclick="switchReportViewMode('total')" id="btn-report-total" class="bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition text-xs">總統計量</button>
               <button onclick="switchReportViewMode('subgroup')" id="btn-report-subgroup" class="text-slate-600 font-semibold px-3 py-1 rounded-md transition text-xs">分單明細</button>
@@ -190,9 +189,8 @@
       <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-2 gap-2">
           <h2 class="text-lg font-bold text-slate-800">💰 區塊三：收錢與現場對帳區</h2>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-2 sm:gap-3">
             <div class="flex items-center gap-1.5 text-xs text-slate-700 font-semibold">
-              <span>依分單篩選：</span>
               <select id="filter-subgroup-select" onchange="renderOrdersSection()" class="border border-slate-300 p-1.5 rounded-lg text-xs bg-white outline-none">
                 <option value="all">全部</option>
                 <option value="0">不分單</option>
@@ -203,6 +201,10 @@
                 <option value="5">第5單</option>
               </select>
             </div>
+            <!-- 新增：重新排序按鈕 -->
+            <button onclick="sortOrdersBySubGroup()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg transition text-xs flex items-center gap-1">
+              🔄 重新排序
+            </button>
             <div class="flex gap-2 text-sm bg-slate-100 p-1 rounded-lg">
               <button onclick="switchViewMode('person')" id="btn-view-person" class="bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition text-xs">👤 按個人對帳</button>
               <button onclick="switchViewMode('item')" id="btn-view-item" class="text-slate-600 font-semibold px-3 py-1 rounded-md transition text-xs">🍱 按餐點發放</button>
@@ -419,6 +421,19 @@
       renderOrdersSection();
       renderSummarySection();
       renderPrintTable();
+    }
+
+    // 重新排序功能：依分單排序（第1單、第2單...不分單放後面）
+    function sortOrdersBySubGroup() {
+      allOrders.sort((a, b) => {
+        let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : 999;
+        let sgB = (b.sub_group !== null && b.sub_group !== undefined && b.sub_group > 0) ? b.sub_group : 999;
+        if (sgA !== sgB) return sgA - sgB;
+        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      });
+      renderOrdersSection();
+      renderPrintTable();
+      alert('🔄 已完成重新排序：相同分單的訂單已集中排列！');
     }
 
     function handleSearchInput() {
@@ -981,15 +996,13 @@
       XLSX.writeFile(workbook, `${data.name}_菜單.xlsx`);
     }
 
-    // ---------- 外送資訊 ----------
+    // ---------- 外送資訊 (已設定預設資料) ----------
     function loadDeliveryInfo() {
-      const now = new Date();
-      const dateStr = `${now.getMonth()+1}/${now.getDate()} 上午11點30分`;
-      document.getElementById('info-unit').value = localStorage.getItem('info_unit') || '';
-      document.getElementById('info-address').value = localStorage.getItem('info_address') || '';
-      document.getElementById('info-phone').value = localStorage.getItem('info_phone') || '';
-      document.getElementById('info-contact').value = localStorage.getItem('info_contact') || '';
-      document.getElementById('info-time').value = localStorage.getItem('info_time') || dateStr;
+      document.getElementById('info-unit').value = localStorage.getItem('info_unit') || '經濟部產業園區管理局';
+      document.getElementById('info-address').value = localStorage.getItem('info_address') || '高雄市楠梓區加昌路600號';
+      document.getElementById('info-phone').value = localStorage.getItem('info_phone') || '(07)361-1212#309';
+      document.getElementById('info-contact').value = localStorage.getItem('info_contact') || '徐梓恩';
+      document.getElementById('info-time').value = localStorage.getItem('info_time') || '8/23 上午11點30分';
     }
 
     function saveDeliveryInfo() {
@@ -1000,7 +1013,7 @@
       localStorage.setItem('info_time', document.getElementById('info-time').value);
     }
 
-    // ---------- 統計 / 明細整理 (支援 總統計量 / 分單明細 切換) ----------
+    // ---------- 統計 / 明細整理 ----------
     function getCategoryMap() {
       const map = {};
       currentMenuData.forEach(i => { map[i.name] = i.category || guessCategory(i.name); });
@@ -1064,7 +1077,6 @@
         html += `<div class="font-bold border-t border-slate-200 pt-2.5 mt-3 text-right text-slate-800 text-base">餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元</div>`;
         box.innerHTML = html;
       } else {
-        // 分單明細檢視
         const subGroups = {};
         allOrders.forEach(o => {
           const sg = (o.sub_group !== null && o.sub_group !== undefined && o.sub_group > 0) ? `第${o.sub_group}單` : '不分單';
@@ -1237,8 +1249,6 @@
         container.innerHTML = filtered.map(o => {
           const sortedItems = mergeCartItems(o.items || []);
           const changeVal = localStorage.getItem(`order_change_${o.id}`);
-          const receivedVal = localStorage.getItem(`order_received_${o.id}`);
-          
           const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
           const changeBadge = (o.is_paid && changeNum > 0) ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[11px] font-bold">找$${changeVal}</span>` : '';
           const currentSg = (o.sub_group !== null && o.sub_group !== undefined) ? o.sub_group : 0;
@@ -1412,7 +1422,7 @@
       await fetchOrders();
     }
 
-    // ---------- 匯出 / 列印 ----------
+    // ---------- 匯出 / 列印 (依目前排序輸出) ----------
     function exportExcel() {
       if (viewMode === 'person') {
         const rows = allOrders.map(o => {
@@ -1508,7 +1518,7 @@
           <tr>
             <td class="border border-black p-2 text-center">☐</td>
             <td class="border border-black p-2 font-bold">${escapeHtml(k)}</td>
-            <td class="border border-black p-2 text-center font-bold">${itemGroups[keyNames=>itemGroups[k]].length || itemGroups[k].length}</td>
+            <td class="border border-black p-2 text-center font-bold">${itemGroups[k].length}</td>
             <td class="border border-black p-2">${itemGroups[k].join(', ')}</td>
           </tr>
         `).join('');
