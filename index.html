@@ -569,7 +569,6 @@
       return DRINK_KEYWORDS.some(k => name.includes(k)) ? 'drink' : 'meal';
     }
 
-    // 依據名稱與規格完整排序整併，讓相同餐點品項排在一起
     function mergeCartItems(cart) {
       const mergedMap = new Map();
       cart.forEach(item => {
@@ -1087,7 +1086,6 @@
 
       if (viewMode === 'person') {
         container.innerHTML = filtered.map(o => {
-          // 確保個人對帳中的餐點明細也經過排序顯示
           const sortedItems = mergeCartItems(o.items || []);
           return `
             <div class="flex flex-wrap justify-between items-center p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
@@ -1107,7 +1105,6 @@
           `;
         }).join('');
       } else {
-        // 按餐點發放：依同類型/同品項與規格群組排序在一起
         const itemGroups = {};
         filtered.forEach(o => {
           o.items.forEach(i => {
@@ -1117,7 +1114,6 @@
           });
         });
 
-        // 將餐點品項名稱排序
         const sortedKeys = Object.keys(itemGroups).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
 
         container.innerHTML = sortedKeys.map(k => `
@@ -1139,9 +1135,10 @@
       const order = allOrders.find(o => o.id === id);
       if (!order) return;
 
+      // 如果本來是未付款，按下去時加入找零計算功能
       if (!order.is_paid) {
         const input = prompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元\n請輸入實收金額（例如 500 或 1000）：`, order.total_price);
-        if (input === null) return; // 取消不動作
+        if (input === null) return; // 點選取消則不變動
         const received = parseInt(input);
         if (isNaN(received)) return alert('請輸入有效的數字金額！');
         if (received < order.total_price) return alert('實收金額小於應付金額！');
@@ -1149,7 +1146,15 @@
         alert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
       }
 
-      await sb.from('orders').update({ is_paid: !order.is_paid }).eq('id', id);
+      // 切換付款狀態（已付款 <-> 未付款）並同步更新到資料庫
+      const newPaidStatus = !order.is_paid;
+      const { error } = await sb.from('orders').update({ is_paid: newPaidStatus }).eq('id', id);
+      
+      if (error) {
+        alert(`❌ 更新付款狀態失敗：${error.message}`);
+        return;
+      }
+      
       await fetchOrders();
     }
 
@@ -1217,7 +1222,12 @@
       let total = 0;
       finalEditingItems.forEach(i => total += i.price * i.qty);
 
-      await sb.from('orders').update({ items: finalEditingItems, total_price: total }).eq('id', editingOrderId);
+      const { error } = await sb.from('orders').update({ items: finalEditingItems, total_price: total }).eq('id', editingOrderId);
+      if (error) {
+        alert(`❌ 儲存修改失敗：${error.message}`);
+        return;
+      }
+      
       closeEditModal();
       await fetchOrders();
     }
