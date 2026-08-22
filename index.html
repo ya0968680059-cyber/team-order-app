@@ -1132,8 +1132,8 @@
     }
 
     async function togglePaid(id) {
-      const order = allOrders.find(o => o.id === id);
-      if (!order) return;
+      const order = allOrders.find(o => String(o.id) === String(id));
+      if (!order) { console.error('togglePaid: 找不到訂單，id=', id, 'allOrders ids=', allOrders.map(o=>o.id)); alert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); return; }
 
       // 如果本來是未付款，按下去時加入找零計算功能
       if (!order.is_paid) {
@@ -1159,17 +1159,18 @@
     }
 
     async function deleteOrder(id) {
-      const order = allOrders.find(o => o.id === id);
+      const order = allOrders.find(o => String(o.id) === String(id));
       const name = order ? order.user_name : '';
       if (!confirm(`確定要刪除 ${name} 的整筆訂單嗎？`)) return;
-      await sb.from('orders').delete().eq('id', id);
+      const { error } = await sb.from('orders').delete().eq('id', id);
+      if (error) { alert(`❌ 刪除失敗：${error.message}`); return; }
       await fetchOrders();
     }
 
     // ---------- 訂單修改彈窗 ----------
     function openEditModal(id) {
-      const order = allOrders.find(o => o.id === id);
-      if (!order) return;
+      const order = allOrders.find(o => String(o.id) === String(id));
+      if (!order) { console.error('openEditModal: 找不到訂單，id=', id, 'allOrders ids=', allOrders.map(o=>o.id)); alert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); return; }
       editingOrderId = id;
       editingItems = mergeCartItems(JSON.parse(JSON.stringify(order.items)));
 
