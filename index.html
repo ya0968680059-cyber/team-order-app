@@ -91,7 +91,10 @@
     <section id="admin-section" class="hidden space-y-6 no-print">
       <div class="bg-amber-50 border border-amber-200 p-4 rounded-xl flex justify-between items-center shadow-sm">
         <span class="font-bold text-amber-900 flex items-center gap-1">🔐 後台管理者權限已啟用</span>
-        <button onclick="closeAdmin()" class="text-sm bg-amber-200 hover:bg-amber-300 text-amber-900 px-3 py-1.5 rounded-lg font-semibold transition">退出後台</button>
+        <div class="flex gap-2">
+          <button onclick="openChangePasswordModal()" class="text-sm bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-lg font-semibold transition">修改密碼</button>
+          <button onclick="closeAdmin()" class="text-sm bg-amber-200 hover:bg-amber-300 text-amber-900 px-3 py-1.5 rounded-lg font-semibold transition">退出後台</button>
+        </div>
       </div>
 
       <!-- 【步驟 1：狀態與團購控制模組】 -->
@@ -101,8 +104,9 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div class="space-y-2">
             <p class="text-sm text-slate-600">目前狀態：<span id="status-badge" class="font-bold">🟢 開放點餐中</span></p>
-            <div class="flex gap-2">
-              <button onclick="toggleOrderStatus(false)" class="bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition">🔴 暫停接單 (一鍵結單)</button>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="startNewGroup()" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold px-3.5 py-2 rounded-lg shadow-sm transition">🧹 開新訂單</button>
+              <button onclick="toggleOrderStatus(false)" class="bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition">🔴 一鍵結單</button>
               <button onclick="toggleOrderStatus(true)" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition">🟢 恢復接單</button>
             </div>
           </div>
@@ -113,11 +117,6 @@
               <button onclick="saveCutoffTime()" class="bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">儲存廣播</button>
             </div>
           </div>
-        </div>
-
-        <div class="pt-3 border-t flex flex-wrap gap-3">
-          <button onclick="startNewGroup()" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold px-4 py-2 rounded-lg shadow-sm transition">🧹 清空目前訂單 / 開啟新一團</button>
-          <button onclick="openChangePasswordModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-bold px-4 py-2 rounded-lg transition">🔑 修改管理密碼</button>
         </div>
 
         <!-- 【步驟 2：菜單管理模組】 -->
@@ -137,9 +136,10 @@
               <input type="text" id="history-menu-search" autocomplete="off" placeholder="🔍 搜尋歷史菜單店家名稱..." oninput="renderHistoryMenuOptions()" onfocus="renderHistoryMenuOptions()" class="border border-slate-300 p-2 rounded-lg text-sm w-full outline-none focus:ring-2 focus:ring-blue-500">
               <div id="history-menu-dropdown" class="hidden absolute z-30 bg-white border border-slate-200 rounded-lg shadow-lg mt-1 max-h-56 overflow-y-auto w-full"></div>
             </div>
-            <div class="flex gap-2 shrink-0">
-              <button onclick="switchMenu()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition">🟢 啟用此菜單</button>
-              <button onclick="deleteMenu()" class="bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition">🗑️ 刪除此菜單</button>
+            <div class="flex flex-wrap gap-2 shrink-0">
+              <button onclick="switchMenu()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-3 py-2 rounded-lg transition">🟢 啟用此菜單</button>
+              <button onclick="deleteMenu()" class="bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold px-3 py-2 rounded-lg transition">🗑️ 刪除此菜單</button>
+              <button onclick="downloadCurrentMenu()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-3 py-2 rounded-lg transition">📥 下載此菜單</button>
             </div>
           </div>
         </div>
@@ -707,7 +707,7 @@
       }
     }
 
-    // ---------- 管理者登入 / 密碼 (改用直接讀寫 settings 表) ----------
+    // ---------- 管理者登入 / 密碼 ----------
     async function toggleAdminAuth() {
       const pwd = prompt("請輸入管理者密碼：");
       if (!pwd) return;
@@ -766,7 +766,6 @@
     function openChangePasswordModal() { document.getElementById('password-modal').classList.remove('hidden'); }
     function closePasswordModal() { document.getElementById('password-modal').classList.add('hidden'); }
 
-    // 修改密碼：直接查詢 settings 資料庫舊密碼，比對後寫入新密碼
     async function submitChangePassword() {
       const oldP = document.getElementById('pwd-old').value;
       const new1 = document.getElementById('pwd-new1').value;
@@ -907,6 +906,37 @@
       await sb.from('menus').delete().eq('id', selectedHistoryMenuId);
       await fetchActiveMenu();
       alert('菜單已刪除！');
+    }
+
+    // 新增：下載菜單 Excel 功能
+    async function downloadCurrentMenu() {
+      const targetMenuId = selectedHistoryMenuId || currentActiveMenuId;
+      if (!targetMenuId) return alert('請先選擇或啟用要下載的菜單！');
+
+      const { data, error } = await sb.from('menus').select('*').eq('id', targetMenuId).single();
+      if (error || !data) return alert('無法讀取該菜單資料！');
+
+      const menuList = data.data || [];
+      if (!menuList.length) return alert('此菜單無任何品項可匯出！');
+
+      const rows = menuList.map(item => {
+        const specStr = item.sizes ? item.sizes.map(s => `${s.name}:${s.extra}`).join('/') : '';
+        const addOnStr = item.addOns ? item.addOns.map(a => `${a.name}:${a.price}`).join('/') : '';
+        const categoryStr = item.category === 'drink' ? '飲料' : '餐點';
+
+        return {
+          '品項': item.name,
+          '價格': item.price,
+          '規格': specStr,
+          '加點': addOnStr,
+          '類別': categoryStr
+        };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "菜單");
+      XLSX.writeFile(workbook, `${data.name}_菜單.xlsx`);
     }
 
     // ---------- 外送資訊 ----------
