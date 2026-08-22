@@ -51,18 +51,22 @@
         <input type="text" id="user-name-input" oninput="debounceHandleUserNameChange()" placeholder="請輸入姓名（例如：張小明）" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none transition">
       </div>
 
-      <!-- 2. 可搜尋菜單與動態點餐區 -->
+      <!-- 2. 可搜尋下拉式菜單與點餐區 -->
       <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-4">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3">
-          <h2 class="text-lg font-bold text-slate-800">2. 選擇餐點與客製化規格</h2>
-          <div class="relative w-full sm:w-64">
-            <input type="text" id="search-menu-input" oninput="renderMenuList()" placeholder="🔍 搜尋餐點關鍵字 (如: 排骨)..." class="w-full border border-slate-300 text-sm rounded-lg p-2 outline-none focus:ring-2 focus:ring-blue-500">
-          </div>
+        <h2 class="text-lg font-bold text-slate-800 border-b pb-2">2. 選擇餐點與客製化規格</h2>
+        
+        <!-- 可搜尋下拉選單組合元件 -->
+        <div class="relative">
+          <label class="block text-xs font-bold text-slate-600 mb-1">🔍 選擇或搜尋品項：</label>
+          <input type="text" id="search-menu-input" autocomplete="off" oninput="renderMenuDropdown()" onfocus="renderMenuDropdown()" placeholder="請點擊選擇或輸入關鍵字搜尋（如：排骨、紅茶）..." class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white transition">
+          
+          <!-- 下拉選單選單浮層 -->
+          <div id="menu-dropdown-list" class="hidden absolute z-30 bg-white border border-slate-200 rounded-lg shadow-xl mt-1 max-h-60 overflow-y-auto w-full"></div>
         </div>
 
-        <!-- 餐點卡片容器 -->
-        <div id="user-menu-container" class="space-y-3 max-h-[30rem] overflow-y-auto pr-1">
-          <p class="text-slate-400 text-center py-8">載入菜單資料中...</p>
+        <!-- 所選餐點的客製化與下單面板 -->
+        <div id="selected-item-panel" class="hidden p-4 bg-slate-50 rounded-xl border border-blue-200 space-y-3 transition">
+          <!-- 動態載入選擇的餐點細項 -->
         </div>
       </div>
 
@@ -302,6 +306,7 @@
     let viewMode = 'person';
     let editingOrderId = null;
     let editingItems = [];
+    let selectedMenuIndex = null; // 紀錄目前選擇的下拉選單餐點索引
 
     const DRINK_KEYWORDS = ['茶','咖啡','可樂','汽水','果汁','豆漿','奶茶','可可','紅茶','綠茶','冬瓜','紅葉','珍奶','飲料','奶昔','氣泡水','沙士'];
     const DIET_WARNING_KEYWORDS = ['素','全素','蔬食','過敏','禁忌','不吃','不含'];
@@ -313,9 +318,15 @@
       await fetchActiveMenu();
       await fetchOrders();
       document.addEventListener('click', (e) => {
-        const wrap = document.getElementById('history-menu-search')?.parentElement;
-        if (wrap && !wrap.contains(e.target)) {
+        // 全局點擊關閉歷史菜單與品項下拉選單
+        const historyWrap = document.getElementById('history-menu-search')?.parentElement;
+        if (historyWrap && !historyWrap.contains(e.target)) {
           document.getElementById('history-menu-dropdown')?.classList.add('hidden');
+        }
+
+        const menuWrap = document.getElementById('search-menu-input')?.parentElement;
+        if (menuWrap && !menuWrap.contains(e.target)) {
+          document.getElementById('menu-dropdown-list')?.classList.add('hidden');
         }
       });
     }
@@ -381,9 +392,10 @@
         currentMenuData = [];
         document.getElementById('app-title-text').innerText = `團隊團購點餐系統`;
         document.getElementById('active-menu-name').innerText = '無';
-        document.getElementById('user-menu-container').innerHTML = `<p class="text-slate-400 text-center py-8">目前尚未啟用任何菜單</p>`;
       }
-      renderMenuList();
+      selectedMenuIndex = null;
+      document.getElementById('search-menu-input').value = '';
+      document.getElementById('selected-item-panel').classList.add('hidden');
       await fetchHistoryMenus();
     }
 
@@ -395,83 +407,104 @@
       renderPrintTable();
     }
 
-    function renderMenuList() {
-      const container = document.getElementById('user-menu-container');
+    // 渲染下拉選單項目
+    function renderMenuDropdown() {
+      const dropdown = document.getElementById('menu-dropdown-list');
       const keyword = document.getElementById('search-menu-input').value.trim().toLowerCase();
-      if (!currentMenuData.length) return;
+
+      if (!currentMenuData.length) {
+        dropdown.innerHTML = `<div class="p-3 text-sm text-slate-400 text-center">目前尚未上傳或啟用菜單</div>`;
+        dropdown.classList.remove('hidden');
+        return;
+      }
 
       const indexed = currentMenuData.map((item, origIdx) => ({ item, origIdx }));
       const filtered = indexed.filter(({ item }) => item.name.toLowerCase().includes(keyword));
 
       if (filtered.length === 0) {
-        container.innerHTML = `<p class="text-slate-400 text-center py-6">找不到符合的餐點</p>`;
-        return;
+        dropdown.innerHTML = `<div class="p-3 text-sm text-slate-400 text-center">找不到符合關鍵字的餐點</div>`;
+      } else {
+        dropdown.innerHTML = filtered.map(({ item, origIdx }) => `
+          <div onclick="selectMenuItem(${origIdx})" class="p-3 text-sm hover:bg-blue-50 cursor-pointer border-b last:border-b-0 border-slate-100 flex justify-between items-center transition">
+            <span class="font-bold text-slate-800">${item.name}</span>
+            <span class="text-xs font-extrabold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">$${item.price} 起</span>
+          </div>
+        `).join('');
       }
+      dropdown.classList.remove('hidden');
+    }
 
-      container.innerHTML = filtered.map(({ item, origIdx }) => {
-        const sizes = item.sizes && item.sizes.length ? item.sizes : [{ name: '標準', extra: 0 }];
-        const addOns = item.addOns || [];
+    // 點擊選擇品項後，開啟詳細客製化區塊
+    function selectMenuItem(origIdx) {
+      selectedMenuIndex = origIdx;
+      const item = currentMenuData[origIdx];
+      if (!item) return;
 
-        return `
-          <div class="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3 hover:border-blue-300 transition">
-            <div class="flex justify-between items-center border-b pb-2">
-              <span class="font-bold text-base text-slate-800">${item.name}</span>
-              <span class="text-sm font-extrabold text-rose-600">$${item.price} 起</span>
-            </div>
+      document.getElementById('search-menu-input').value = item.name;
+      document.getElementById('menu-dropdown-list').classList.add('hidden');
 
-            <!-- 動態規格 (單選) -->
-            ${sizes.length > 1 ? `
-              <div class="text-xs space-y-1">
-                <span class="font-bold text-slate-600">選擇規格：</span>
-                <div class="flex flex-wrap gap-3">
-                  ${sizes.map((s, sIdx) => `
-                    <label class="inline-flex items-center gap-1 cursor-pointer select-none">
-                      <input type="radio" name="size-${origIdx}" value="${sIdx}" ${sIdx===0?'checked':''} onchange="updateItemCalc(${origIdx})" class="text-blue-600">
-                      <span>${s.name} ${s.extra > 0 ? `(+$${s.extra})` : ''}</span>
-                    </label>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
+      const panel = document.getElementById('selected-item-panel');
+      const sizes = item.sizes && item.sizes.length ? item.sizes : [{ name: '標準', extra: 0 }];
+      const addOns = item.addOns || [];
 
-            <!-- 加點選項 (複選) -->
-            ${addOns.length > 0 ? `
-              <div class="text-xs space-y-1">
-                <span class="font-bold text-slate-600">加點加價選項：</span>
-                <div class="flex flex-wrap gap-3">
-                  ${addOns.map((a, aIdx) => `
-                    <label class="inline-flex items-center gap-1 cursor-pointer select-none">
-                      <input type="checkbox" id="addon-${origIdx}-${aIdx}" value="${aIdx}" onchange="updateItemCalc(${origIdx})" class="rounded text-blue-600">
-                      <span>${a.name} (+$${a.price})</span>
-                    </label>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
+      panel.innerHTML = `
+        <div class="flex justify-between items-center border-b pb-2">
+          <span class="font-bold text-base text-slate-800">🛒 正在點購：${item.name}</span>
+          <span class="text-sm font-extrabold text-rose-600">$${item.price} 起</span>
+        </div>
 
-            <!-- 備註與前台數量選擇 [ - ] 1 [ + ] & 即時小計 -->
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-1">
-              <input type="text" id="note-${origIdx}" placeholder="飲食備註 (如: 飯少/大辣/去冰)" class="border border-slate-300 text-xs p-1.5 rounded-lg w-full sm:w-52 outline-none">
-
-              <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
-                <!-- 前台數量選擇按鈕區 -->
-                <div class="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shrink-0">
-                  <button type="button" onclick="changeQuantity(${origIdx}, -1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-r border-slate-300 select-none">-</button>
-                  <input type="number" id="qty-${origIdx}" value="1" min="1" onchange="updateItemCalc(${origIdx})" class="w-9 text-center text-xs font-bold focus:outline-none p-1">
-                  <button type="button" onclick="changeQuantity(${origIdx}, 1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-l border-slate-300 select-none">+</button>
-                </div>
-
-                <span class="text-xs font-bold text-slate-700 shrink-0">小計: $<span id="item-calc-${origIdx}">${item.price}</span></span>
-                <button onclick="addToCart(${origIdx})" ${!isOrderingOpen ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg shadow-sm transition shrink-0">
-                  🛒 加入購物車
-                </button>
-              </div>
+        <!-- 動態規格 (單選) -->
+        ${sizes.length > 1 ? `
+          <div class="text-xs space-y-1">
+            <span class="font-bold text-slate-600">選擇規格：</span>
+            <div class="flex flex-wrap gap-3">
+              ${sizes.map((s, sIdx) => `
+                <label class="inline-flex items-center gap-1 cursor-pointer select-none">
+                  <input type="radio" name="size-${origIdx}" value="${sIdx}" ${sIdx===0?'checked':''} onchange="updateItemCalc(${origIdx})" class="text-blue-600">
+                  <span>${s.name} ${s.extra > 0 ? `(+$${s.extra})` : ''}</span>
+                </label>
+              `).join('')}
             </div>
           </div>
-        `;
-      }).join('');
+        ` : ''}
 
-      filtered.forEach(({ origIdx }) => updateItemCalc(origIdx));
+        <!-- 加點選項 (複選) -->
+        ${addOns.length > 0 ? `
+          <div class="text-xs space-y-1">
+            <span class="font-bold text-slate-600">加點加價選項：</span>
+            <div class="flex flex-wrap gap-3">
+              ${addOns.map((a, aIdx) => `
+                <label class="inline-flex items-center gap-1 cursor-pointer select-none">
+                  <input type="checkbox" id="addon-${origIdx}-${aIdx}" value="${aIdx}" onchange="updateItemCalc(${origIdx})" class="rounded text-blue-600">
+                  <span>${a.name} (+$${a.price})</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- 備註與前台數量選擇 [ - ] 1 [ + ] & 即時小計 -->
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-1">
+          <input type="text" id="note-${origIdx}" placeholder="飲食備註 (如: 飯少/大辣/去冰)" class="border border-slate-300 text-xs p-2 rounded-lg w-full sm:w-56 outline-none bg-white">
+
+          <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
+            <!-- 前台數量選擇按鈕區 -->
+            <div class="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shrink-0">
+              <button type="button" onclick="changeQuantity(${origIdx}, -1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-r border-slate-300 select-none">-</button>
+              <input type="number" id="qty-${origIdx}" value="1" min="1" onchange="updateItemCalc(${origIdx})" class="w-9 text-center text-xs font-bold focus:outline-none p-1">
+              <button type="button" onclick="changeQuantity(${origIdx}, 1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-l border-slate-300 select-none">+</button>
+            </div>
+
+            <span class="text-xs font-bold text-slate-700 shrink-0">小計: $<span id="item-calc-${origIdx}">${item.price}</span></span>
+            <button onclick="addToCart(${origIdx})" ${!isOrderingOpen ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition shrink-0">
+              🛒 加入購物車
+            </button>
+          </div>
+        </div>
+      `;
+
+      panel.classList.remove('hidden');
+      updateItemCalc(origIdx);
     }
 
     // 動態調整數量按鈕邏輯
@@ -551,10 +584,10 @@
       userCart.push(details);
       renderCart();
 
-      // 重置數量回到 1 份
-      const qtyInput = document.getElementById(`qty-${menuIdx}`);
-      if (qtyInput) qtyInput.value = 1;
-      updateItemCalc(menuIdx);
+      // 清空目前搜尋與隱藏客製面板，保持介面乾淨
+      document.getElementById('search-menu-input').value = '';
+      document.getElementById('selected-item-panel').classList.add('hidden');
+      selectedMenuIndex = null;
     }
 
     function renderCart() {
@@ -605,7 +638,7 @@
       }, 400);
     }
 
-    // 送出訂單（修復資料庫寫入與錯誤捕捉）
+    // 送出訂單
     async function submitOrder() {
       if (!isOrderingOpen) return alert('本次團購已結單！');
       const name = document.getElementById('user-name-input').value.trim();
@@ -647,7 +680,7 @@
       }
     }
 
-    // ---------- 管理者登入 / 密碼 (相容舊版預設密碼與 RPC) ----------
+    // ---------- 管理者登入 / 密碼 ----------
     async function toggleAdminAuth() {
       const pwd = prompt("請輸入管理者密碼：");
       if (!pwd) return;
@@ -679,7 +712,6 @@
       isOrderingOpen = status;
       await sb.from('settings').upsert({ key: 'is_active', value: JSON.stringify(status) });
       updateStatusUI();
-      renderMenuList();
     }
 
     async function saveCutoffTime() {
@@ -725,7 +757,7 @@
       closePasswordModal();
     }
 
-    // ---------- Excel 菜單上傳 (相容全形與半形分隔符號) ----------
+    // ---------- Excel 菜單上傳 ----------
     function parseSpecColumn(raw) {
       if (!raw) return [];
       return String(raw).split(/[\/\／]/).map(part => {
