@@ -30,7 +30,6 @@
         </h1>
         <p id="broadcast-bar" class="text-xs text-blue-100 mt-0.5">📢 載入廣播資訊中...</p>
       </div>
-      <!-- 修正：「修改密碼」、「退出後台」移到「團主管理」的位置 -->
       <div id="nav-auth-container" class="flex items-center gap-2">
         <button onclick="toggleAdminAuth()" id="btn-admin-toggle" class="bg-blue-700 hover:bg-blue-800 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition flex items-center gap-1">
           ⚙️ 團主管理
@@ -528,7 +527,6 @@
           }
         }
       } else if (sizes.length === 1 && sizes[0].name !== '標準') {
-        // 修正：如果規格只有一種但包含名稱（如大盛），確保後台/購物車正確帶入規格名稱
         singleUnitPrice += (sizes[0].extra || 0);
         specNotes.push(sizes[0].name);
       }
@@ -571,7 +569,7 @@
       return DRINK_KEYWORDS.some(k => name.includes(k)) ? 'drink' : 'meal';
     }
 
-    // 修正：整併同品項與同規格備註的項目，確保同類型的餐點（如大小盛分開）能正確排序組合在一起
+    // 依據名稱與規格完整排序整併，讓相同餐點品項排在一起
     function mergeCartItems(cart) {
       const mergedMap = new Map();
       cart.forEach(item => {
@@ -582,7 +580,6 @@
           mergedMap.set(key, { ...item });
         }
       });
-      // 依照名稱與備註排序，確保同類/同名稱排在一起，避免大小盛或不同規格插在中間
       const sorted = Array.from(mergedMap.values()).sort((a, b) => {
         if (a.name !== b.name) return a.name.localeCompare(b.name, 'zh-Hant');
         return (a.note || '').localeCompare(b.note || '', 'zh-Hant');
@@ -713,7 +710,6 @@
 
     async function toggleAdminAuth() {
       if (isAdminLoggedIn) {
-        // 如果已經在後台，點擊則為退出後台
         closeAdmin();
         return;
       }
@@ -733,7 +729,6 @@
           document.getElementById('admin-section').classList.remove('hidden');
           document.getElementById('user-section').classList.add('hidden');
           
-          // 修正：將「修改密碼」與「退出後台」移至頂部導覽列「團主管理」原本的位置
           const navAuthContainer = document.getElementById('nav-auth-container');
           navAuthContainer.innerHTML = `
             <button onclick="openChangePasswordModal()" class="bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">修改密碼</button>
@@ -753,7 +748,6 @@
       document.getElementById('admin-section').classList.add('hidden');
       document.getElementById('user-section').classList.remove('hidden');
       
-      // 恢復頂部按鈕為「團主管理」
       const navAuthContainer = document.getElementById('nav-auth-container');
       navAuthContainer.innerHTML = `
         <button onclick="toggleAdminAuth()" id="btn-admin-toggle" class="bg-blue-700 hover:bg-blue-800 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition flex items-center gap-1">
@@ -1092,37 +1086,45 @@
       if (unpaidOnly) filtered = filtered.filter(o => !o.is_paid);
 
       if (viewMode === 'person') {
-        container.innerHTML = filtered.map(o => `
-          <div class="flex flex-wrap justify-between items-center p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
-            <div class="flex items-center gap-2">
-              <button onclick="togglePaid('${o.id}')" class="${o.is_paid ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'} text-white px-2.5 py-1 rounded-md text-xs font-bold transition">
-                ${o.is_paid ? '🟢 已付款' : '🔴 未付款'}
-              </button>
-              <span class="font-bold text-slate-800 text-base">${escapeHtml(o.user_name)}</span>
-              <span class="text-slate-500 font-extrabold">($${o.total_price})</span>
+        container.innerHTML = filtered.map(o => {
+          // 確保個人對帳中的餐點明細也經過排序顯示
+          const sortedItems = mergeCartItems(o.items || []);
+          return `
+            <div class="flex flex-wrap justify-between items-center p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
+              <div class="flex items-center gap-2">
+                <button onclick="togglePaid('${o.id}')" class="${o.is_paid ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'} text-white px-2.5 py-1 rounded-md text-xs font-bold transition">
+                  ${o.is_paid ? '🟢 已付款' : '🔴 未付款'}
+                </button>
+                <span class="font-bold text-slate-800 text-base">${escapeHtml(o.user_name)}</span>
+                <span class="text-slate-500 font-extrabold">($${o.total_price})</span>
+              </div>
+              <div class="text-xs text-slate-600 flex-1 px-2">${sortedItems.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</div>
+              <div class="flex gap-1.5">
+                <button onclick="openEditModal('${o.id}')" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded-md text-xs font-bold transition">✏️ 修改</button>
+                <button onclick="deleteOrder('${o.id}')" class="bg-rose-100 hover:bg-rose-200 text-rose-700 px-2.5 py-1 rounded-md text-xs font-bold transition">🗑️ 刪除整單</button>
+              </div>
             </div>
-            <div class="text-xs text-slate-600 flex-1 px-2">${o.items.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</div>
-            <div class="flex gap-1.5">
-              <button onclick="openEditModal('${o.id}')" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded-md text-xs font-bold transition">✏️ 修改</button>
-              <button onclick="deleteOrder('${o.id}')" class="bg-rose-100 hover:bg-rose-200 text-rose-700 px-2.5 py-1 rounded-md text-xs font-bold transition">🗑️ 刪除整單</button>
-            </div>
-          </div>
-        `).join('');
+          `;
+        }).join('');
       } else {
+        // 按餐點發放：依同類型/同品項與規格群組排序在一起
         const itemGroups = {};
         filtered.forEach(o => {
           o.items.forEach(i => {
             const key = i.note ? `${i.name} (${i.note})` : i.name;
             if (!itemGroups[key]) itemGroups[key] = [];
-            itemGroups[key].push(`${o.user_name} x ${i.qty}`);
+            itemGroups[key].push({ name: o.user_name, qty: i.qty });
           });
         });
 
-        container.innerHTML = Object.keys(itemGroups).map(k => `
+        // 將餐點品項名稱排序
+        const sortedKeys = Object.keys(itemGroups).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+
+        container.innerHTML = sortedKeys.map(k => `
           <div class="p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm">
-            <div class="font-bold text-blue-700 border-b pb-1.5">${k} <span class="text-xs text-slate-500 font-normal">(共 ${itemGroups[k].length} 人訂購)</span></div>
+            <div class="font-bold text-blue-700 border-b pb-1.5">${k} <span class="text-xs text-slate-500 font-normal">(共 ${itemGroups[k].reduce((acc, cur) => acc + cur.qty, 0)} 份)</span></div>
             <div class="text-xs text-slate-700 mt-2 flex flex-wrap gap-2">
-              ${itemGroups[k].map(u => `<span class="bg-white border px-2 py-1 rounded-md font-medium shadow-sm">${u}</span>`).join('')}
+              ${itemGroups[k].map(u => `<span class="bg-white border px-2 py-1 rounded-md font-medium shadow-sm">${u.name} x ${u.qty}</span>`).join('')}
             </div>
           </div>
         `).join('') || '<p class="text-slate-400 text-sm text-center py-4">目前沒有符合條件的訂單</p>';
@@ -1138,13 +1140,13 @@
       if (!order) return;
 
       if (!order.is_paid) {
-        const input = prompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元\n請輸入實收金額：`, order.total_price);
-        if (input === null) return;
+        const input = prompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元\n請輸入實收金額（例如 500 或 1000）：`, order.total_price);
+        if (input === null) return; // 取消不動作
         const received = parseInt(input);
-        if (isNaN(received)) return;
-        if (received < order.total_price) return alert('實收金額不足！');
+        if (isNaN(received)) return alert('請輸入有效的數字金額！');
+        if (received < order.total_price) return alert('實收金額小於應付金額！');
         const change = received - order.total_price;
-        alert(`💡 應找零錢：$${change} 元\n（確認後將自動標記為已付款）`);
+        alert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
       }
 
       await sb.from('orders').update({ is_paid: !order.is_paid }).eq('id', id);
@@ -1220,12 +1222,12 @@
       await fetchOrders();
     }
 
-    // ---------- 匯出 / 列印 (支援當前檢視畫面切換) ----------
+    // ---------- 匯出 / 列印 ----------
     function exportExcel() {
       if (viewMode === 'person') {
         const rows = allOrders.map(o => ({
           '姓名': o.user_name,
-          '訂購明細': o.items.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('; '),
+          '訂購明細': mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('; '),
           '總金額': o.total_price,
           '付款狀態': o.is_paid ? '已付款' : '未付款',
           '核對簽名欄': ''
@@ -1273,7 +1275,7 @@
           <tr>
             <td class="border border-black p-2 text-center">☐</td>
             <td class="border border-black p-2 font-bold">${escapeHtml(o.user_name)}</td>
-            <td class="border border-black p-2">${o.items.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</td>
+            <td class="border border-black p-2">${mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</td>
             <td class="border border-black p-2 text-right font-bold">$${o.total_price}</td>
             <td class="border border-black p-2 text-center">${o.is_paid ? '已付' : '未付'}</td>
           </tr>
@@ -1294,7 +1296,8 @@
             itemGroups[key].push(`${o.user_name} x${i.qty}`);
           });
         });
-        tbody.innerHTML = Object.keys(itemGroups).map(k => `
+        const sortedKeys = Object.keys(itemGroups).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+        tbody.innerHTML = sortedKeys.map(k => `
           <tr>
             <td class="border border-black p-2 text-center">☐</td>
             <td class="border border-black p-2 font-bold">${escapeHtml(k)}</td>
