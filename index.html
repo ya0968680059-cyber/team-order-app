@@ -30,9 +30,12 @@
         </h1>
         <p id="broadcast-bar" class="text-xs text-blue-100 mt-0.5">📢 載入廣播資訊中...</p>
       </div>
-      <button onclick="toggleAdminAuth()" class="bg-blue-700 hover:bg-blue-800 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition flex items-center gap-1">
-        ⚙️ 團主管理
-      </button>
+      <!-- 修正：「修改密碼」、「退出後台」移到「團主管理」的位置 -->
+      <div id="nav-auth-container" class="flex items-center gap-2">
+        <button onclick="toggleAdminAuth()" id="btn-admin-toggle" class="bg-blue-700 hover:bg-blue-800 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition flex items-center gap-1">
+          ⚙️ 團主管理
+        </button>
+      </div>
     </div>
   </header>
 
@@ -89,14 +92,6 @@
 
     <!-- ================= 後台：管理者控制台 ================= -->
     <section id="admin-section" class="hidden space-y-6 no-print">
-      <div class="bg-amber-50 border border-amber-200 p-4 rounded-xl flex justify-between items-center shadow-sm">
-        <span class="font-bold text-amber-900 flex items-center gap-1">🔐 後台管理者權限已啟用</span>
-        <div class="flex gap-2">
-          <button onclick="openChangePasswordModal()" class="text-sm bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-lg font-semibold transition">修改密碼</button>
-          <button onclick="closeAdmin()" class="text-sm bg-amber-200 hover:bg-amber-300 text-amber-900 px-3 py-1.5 rounded-lg font-semibold transition">退出後台</button>
-        </div>
-      </div>
-
       <!-- 【步驟 1：狀態與團購控制模組】 -->
       <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-5">
         <h2 class="text-lg font-bold border-b pb-2 text-slate-800">⚙️ 區塊一：團購控制台</h2>
@@ -226,15 +221,11 @@
 
     <!-- 列印專用 A4 排版 -->
     <div class="print-only">
-      <h1 class="text-2xl font-bold mb-4 text-center">團購現場發餐對帳劃單表</h1>
+      <h1 class="text-2xl font-bold mb-4 text-center" id="print-title">團購現場發餐對帳劃單表</h1>
       <table class="w-full border-collapse border border-black text-left text-sm">
         <thead>
-          <tr class="bg-slate-100">
-            <th class="border border-black p-2 text-center w-12">核對</th>
-            <th class="border border-black p-2 w-28">姓名</th>
-            <th class="border border-black p-2">訂購明細與規格</th>
-            <th class="border border-black p-2 text-right w-24">應付金額</th>
-            <th class="border border-black p-2 text-center w-20">狀態</th>
+          <tr id="print-table-header" class="bg-slate-100">
+            <!-- 動態根據檢視模式切換表頭 -->
           </tr>
         </thead>
         <tbody id="print-table-body"></tbody>
@@ -536,6 +527,10 @@
             if (sObj.name !== '標準') specNotes.push(sObj.name);
           }
         }
+      } else if (sizes.length === 1 && sizes[0].name !== '標準') {
+        // 修正：如果規格只有一種但包含名稱（如大盛），確保後台/購物車正確帶入規格名稱
+        singleUnitPrice += (sizes[0].extra || 0);
+        specNotes.push(sizes[0].name);
       }
 
       const addOns = item.addOns || [];
@@ -576,6 +571,7 @@
       return DRINK_KEYWORDS.some(k => name.includes(k)) ? 'drink' : 'meal';
     }
 
+    // 修正：整併同品項與同規格備註的項目，確保同類型的餐點（如大小盛分開）能正確排序組合在一起
     function mergeCartItems(cart) {
       const mergedMap = new Map();
       cart.forEach(item => {
@@ -586,7 +582,12 @@
           mergedMap.set(key, { ...item });
         }
       });
-      return Array.from(mergedMap.values());
+      // 依照名稱與備註排序，確保同類/同名稱排在一起，避免大小盛或不同規格插在中間
+      const sorted = Array.from(mergedMap.values()).sort((a, b) => {
+        if (a.name !== b.name) return a.name.localeCompare(b.name, 'zh-Hant');
+        return (a.note || '').localeCompare(b.note || '', 'zh-Hant');
+      });
+      return sorted;
     }
 
     // ---------- 購物車 ----------
@@ -707,8 +708,16 @@
       }
     }
 
-    // ---------- 管理者登入 / 密碼 ----------
+    // ---------- 管理者登入 / 密碼與面板控制 ----------
+    let isAdminLoggedIn = false;
+
     async function toggleAdminAuth() {
+      if (isAdminLoggedIn) {
+        // 如果已經在後台，點擊則為退出後台
+        closeAdmin();
+        return;
+      }
+
       const pwd = prompt("請輸入管理者密碼：");
       if (!pwd) return;
 
@@ -720,8 +729,16 @@
         }
 
         if (pwd === dbPassword) {
+          isAdminLoggedIn = true;
           document.getElementById('admin-section').classList.remove('hidden');
           document.getElementById('user-section').classList.add('hidden');
+          
+          // 修正：將「修改密碼」與「退出後台」移至頂部導覽列「團主管理」原本的位置
+          const navAuthContainer = document.getElementById('nav-auth-container');
+          navAuthContainer.innerHTML = `
+            <button onclick="openChangePasswordModal()" class="bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">修改密碼</button>
+            <button onclick="toggleAdminAuth()" class="bg-rose-700 hover:bg-rose-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">退出後台</button>
+          `;
           return;
         }
       } catch(e) {
@@ -732,8 +749,17 @@
     }
 
     function closeAdmin() {
+      isAdminLoggedIn = false;
       document.getElementById('admin-section').classList.add('hidden');
       document.getElementById('user-section').classList.remove('hidden');
+      
+      // 恢復頂部按鈕為「團主管理」
+      const navAuthContainer = document.getElementById('nav-auth-container');
+      navAuthContainer.innerHTML = `
+        <button onclick="toggleAdminAuth()" id="btn-admin-toggle" class="bg-blue-700 hover:bg-blue-800 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition flex items-center gap-1">
+          ⚙️ 團主管理
+        </button>
+      `;
     }
 
     async function toggleOrderStatus(status) {
@@ -908,7 +934,6 @@
       alert('菜單已刪除！');
     }
 
-    // 新增：下載菜單 Excel 功能
     async function downloadCurrentMenu() {
       const targetMenuId = selectedHistoryMenuId || currentActiveMenuId;
       if (!targetMenuId) return alert('請先選擇或啟用要下載的菜單！');
@@ -1042,6 +1067,7 @@
       document.getElementById('btn-view-person').className = mode === 'person' ? 'bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition' : 'text-slate-600 font-semibold px-3 py-1 rounded-md transition';
       document.getElementById('btn-view-item').className = mode === 'item' ? 'bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition' : 'text-slate-600 font-semibold px-3 py-1 rounded-md transition';
       renderOrdersSection();
+      renderPrintTable();
     }
 
     function renderOrdersSection() {
@@ -1194,33 +1220,89 @@
       await fetchOrders();
     }
 
-    // ---------- 匯出 / 列印 ----------
+    // ---------- 匯出 / 列印 (支援當前檢視畫面切換) ----------
     function exportExcel() {
-      const rows = allOrders.map(o => ({
-        '姓名': o.user_name,
-        '訂購明細': o.items.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('; '),
-        '總金額': o.total_price,
-        '付款狀態': o.is_paid ? '已付款' : '未付款',
-        '核對簽名欄': ''
-      }));
-
-      const worksheet = XLSX.utils.json_to_sheet(rows);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "團購訂購單");
-      XLSX.writeFile(workbook, `團購訂單明細_${new Date().toISOString().slice(0,10)}.xlsx`);
+      if (viewMode === 'person') {
+        const rows = allOrders.map(o => ({
+          '姓名': o.user_name,
+          '訂購明細': o.items.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('; '),
+          '總金額': o.total_price,
+          '付款狀態': o.is_paid ? '已付款' : '未付款',
+          '核對簽名欄': ''
+        }));
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "按個人對帳");
+        XLSX.writeFile(workbook, `團購訂單_按個人對帳_${new Date().toISOString().slice(0,10)}.xlsx`);
+      } else {
+        const itemGroups = {};
+        allOrders.forEach(o => {
+          o.items.forEach(i => {
+            const key = i.note ? `${i.name} (${i.note})` : i.name;
+            if (!itemGroups[key]) itemGroups[key] = [];
+            itemGroups[key].push(`${o.user_name} x${i.qty}`);
+          });
+        });
+        const rows = Object.keys(itemGroups).map(k => ({
+          '餐點/品項': k,
+          '總訂購人數': itemGroups[k].length,
+          '訂購名單與數量': itemGroups[k].join(', ')
+        }));
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "按餐點發放");
+        XLSX.writeFile(workbook, `團購訂單_按餐點發放_${new Date().toISOString().slice(0,10)}.xlsx`);
+      }
     }
 
     function renderPrintTable() {
+      const titleEle = document.getElementById('print-title');
+      const headerEle = document.getElementById('print-table-header');
       const tbody = document.getElementById('print-table-body');
-      tbody.innerHTML = allOrders.map(o => `
-        <tr>
-          <td class="border border-black p-2 text-center">☐</td>
-          <td class="border border-black p-2 font-bold">${escapeHtml(o.user_name)}</td>
-          <td class="border border-black p-2">${o.items.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</td>
-          <td class="border border-black p-2 text-right font-bold">$${o.total_price}</td>
-          <td class="border border-black p-2 text-center">${o.is_paid ? '已付' : '未付'}</td>
-        </tr>
-      `).join('');
+
+      if (viewMode === 'person') {
+        titleEle.innerText = '團購現場發餐對帳劃單表（按個人對帳）';
+        headerEle.innerHTML = `
+          <th class="border border-black p-2 text-center w-12">核對</th>
+          <th class="border border-black p-2 w-28">姓名</th>
+          <th class="border border-black p-2">訂購明細與規格</th>
+          <th class="border border-black p-2 text-right w-24">應付金額</th>
+          <th class="border border-black p-2 text-center w-20">狀態</th>
+        `;
+        tbody.innerHTML = allOrders.map(o => `
+          <tr>
+            <td class="border border-black p-2 text-center">☐</td>
+            <td class="border border-black p-2 font-bold">${escapeHtml(o.user_name)}</td>
+            <td class="border border-black p-2">${o.items.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</td>
+            <td class="border border-black p-2 text-right font-bold">$${o.total_price}</td>
+            <td class="border border-black p-2 text-center">${o.is_paid ? '已付' : '未付'}</td>
+          </tr>
+        `).join('');
+      } else {
+        titleEle.innerText = '團購餐點發放清單（按餐點發放）';
+        headerEle.innerHTML = `
+          <th class="border border-black p-2 text-center w-12">點收</th>
+          <th class="border border-black p-2 w-64">餐點品項與規格</th>
+          <th class="border border-black p-2 text-center w-20">總份數</th>
+          <th class="border border-black p-2">各訂購人與數量</th>
+        `;
+        const itemGroups = {};
+        allOrders.forEach(o => {
+          o.items.forEach(i => {
+            const key = i.note ? `${i.name} (${i.note})` : i.name;
+            if (!itemGroups[key]) itemGroups[key] = [];
+            itemGroups[key].push(`${o.user_name} x${i.qty}`);
+          });
+        });
+        tbody.innerHTML = Object.keys(itemGroups).map(k => `
+          <tr>
+            <td class="border border-black p-2 text-center">☐</td>
+            <td class="border border-black p-2 font-bold">${escapeHtml(k)}</td>
+            <td class="border border-black p-2 text-center font-bold">${itemGroups[k].length}</td>
+            <td class="border border-black p-2">${itemGroups[k].join(', ')}</td>
+          </tr>
+        `).join('');
+      }
     }
 
     init();
