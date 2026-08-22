@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>團隊團購點餐系統</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen">
+  <div id="app" class="max-w-md mx-auto p-4 pb-24">
+    <!-- 標頭區 -->
+    <header class="bg-white p-4 rounded-xl shadow-sm mb-4 text-center border border-slate-200">
+      <h1 class="text-xl font-bold text-slate-900">🍔 團隊團購訂餐系統</h1>
+      <p id="cutoff-info" class="text-sm text-slate-500 mt-1">載入中...</p>
+    </header>
+
+    <!-- 訂購人姓名 -->
+    <div class="bg-white p-4 rounded-xl shadow-sm mb-4 border border-slate-200">
+      <label class="block text-sm font-semibold mb-2">訂購人姓名</label>
+      <input type="text" id="user-name" placeholder="請輸入姓名..." class="w-full border border-slate-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+    </div>
+
+    <!-- 菜單列表區 -->
+    <main class="bg-white p-4 rounded-xl shadow-sm mb-4 border border-slate-200">
+      <h2 class="text-lg font-bold mb-3 border-b pb-2">📋 今日菜單</h2>
+      <div id="menu-list" class="space-y-3">
+        <p class="text-slate-400 text-center py-4">菜單載入中...</p>
+      </div>
+    </main>
+
+    <!-- 購物車底部固定區 -->
+    <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-200 p-4 shadow-lg flex justify-between items-center">
+      <div>
+        <span class="text-xs text-slate-500">已選品項</span>
+        <div id="total-price" class="text-lg font-bold text-red-600">NT$ 0</div>
+      </div>
+      <button onclick="submitOrder()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold shadow">送出訂單</button>
+    </div>
+  </div>
+
+  <script>
+    // Supabase 設定由 Vercel 環境變數自動讀取
+    const SUPABASE_URL = "https://imuyohxrtyarclgzrole.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_Qv7AV8g5EhjVnT795Qm-qA_ZuJK772Y";
+    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let currentMenu = [];
+    let cart = {};
+
+    async function init() {
+      // 讀取系統設定
+      const { data: settings } = await supabase.from('settings').select('*');
+      if (settings) {
+        const cutoff = settings.find(s => s.key === 'cutoff_time');
+        if (cutoff) document.getElementById('cutoff-info').innerText = `結單時間：${cutoff.value.replace(/"/g, '')}`;
+      }
+
+      // 讀取菜單
+      const { data: menus } = await supabase.from('menus').select('*').eq('is_active', true).limit(1);
+      if (menus && menus.length > 0) {
+        currentMenu = menus[0].data || [];
+        renderMenu();
+      } else {
+        document.getElementById('menu-list').innerHTML = `<p class="text-slate-400 text-center py-4">目前尚無上架菜單</p>`;
+      }
+    }
+
+    function renderMenu() {
+      const container = document.getElementById('menu-list');
+      if (currentMenu.length === 0) {
+        container.innerHTML = `<p class="text-slate-400 text-center py-4">菜單是空的</p>`;
+        return;
+      }
+      container.innerHTML = currentMenu.map((item, idx) => `
+        <div class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-lg border-b border-slate-100">
+          <div>
+            <div class="font-medium">${item.name}</div>
+            <div class="text-sm text-slate-500">NT$ ${item.price}</div>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button onclick="updateCart(${idx}, -1)" class="w-7 h-7 bg-slate-200 rounded-full font-bold">-</button>
+            <span id="qty-${idx}">${cart[idx] || 0}</span>
+            <button onclick="updateCart(${idx}, 1)" class="w-7 h-7 bg-blue-100 text-blue-600 rounded-full font-bold">+</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function updateCart(idx, change) {
+      cart[idx] = (cart[idx] || 0) + change;
+      if (cart[idx] <= 0) delete cart[idx];
+      document.getElementById(`qty-${idx}`).innerText = cart[idx] || 0;
+      calculateTotal();
+    }
+
+    function calculateTotal() {
+      let total = 0;
+      Object.keys(cart).forEach(idx => {
+        total += currentMenu[idx].price * cart[idx];
+      });
+      document.getElementById('total-price').innerText = `NT$ ${total}`;
+    }
+
+    async function submitOrder() {
+      const userName = document.getElementById('user-name').value.trim();
+      if (!userName) return alert('請先輸入您的姓名！');
+      
+      const items = Object.keys(cart).map(idx => ({
+        name: currentMenu[idx].name,
+        price: currentMenu[idx].price,
+        qty: cart[idx]
+      }));
+
+      if (items.length === 0) return alert('購物車是空的！');
+
+      let total = 0;
+      items.forEach(i => total += i.price * i.qty);
+
+      const { error } = await supabase.from('orders').insert({
+        user_name: userName,
+        items: items,
+        total_price: total
+      });
+
+      if (error) {
+        alert('訂單送出失敗：' + error.message);
+      } else {
+        alert('🎉 訂單已成功送出！');
+        cart = {};
+        renderMenu();
+        calculateTotal();
+        document.getElementById('user-name').value = '';
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
