@@ -1033,22 +1033,34 @@
     function copyLineMessage() {
       const { summary, specialNotes, totalAmount } = computeSummary();
 
-      let text = `【團購訂餐報餐明細】\n`;
-      text += `訂購單位：${document.getElementById('info-unit').value}\n`;
-      text += `外送地址：${document.getElementById('info-address').value}\n`;
-      text += `聯絡電話：${document.getElementById('info-phone').value}\n`;
-      text += `訂購人：${document.getElementById('info-contact').value}\n`;
-      text += `外送時間：${document.getElementById('info-time').value}\n`;
-      text += `------------------------\n`;
+      let text = `【團購訂餐報餐明細】
+`;
+      text += `訂購單位：${document.getElementById('info-unit').value}
+`;
+      text += `外送地址：${document.getElementById('info-address').value}
+`;
+      text += `聯絡電話：${document.getElementById('info-phone').value}
+`;
+      text += `訂購人：${document.getElementById('info-contact').value}
+`;
+      text += `外送時間：${document.getElementById('info-time').value}
+`;
+      text += `------------------------
+`;
 
-      Object.keys(summary).forEach(k => text += `${k} x ${summary[k]}\n`);
+      Object.keys(summary).forEach(k => text += `${k} x ${summary[k]}
+`);
 
       if (specialNotes.length > 0) {
-        text += `------------------------\n⚠️ 特殊備註：\n`;
-        specialNotes.forEach(n => text += `${n}\n`);
+        text += `------------------------
+⚠️ 特殊備註：
+`;
+        specialNotes.forEach(n => text += `${n}
+`);
       }
 
-      text += `------------------------\n總金額：$${totalAmount} 元`;
+      text += `------------------------
+總金額：$${totalAmount} 元`;
 
       navigator.clipboard.writeText(text);
       alert('📋 已成功將 Line 報餐訊息複製至剪貼簿！');
@@ -1087,6 +1099,10 @@
       if (viewMode === 'person') {
         container.innerHTML = filtered.map(o => {
           const sortedItems = mergeCartItems(o.items || []);
+          const changeVal = localStorage.getItem(`order_change_${o.id}`);
+          const receivedVal = localStorage.getItem(`order_received_${o.id}`);
+          const changeBadge = (o.is_paid && changeVal !== null) ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded text-xs font-bold">找零 $${changeVal} (收$${receivedVal})</span>` : '';
+
           return `
             <div class="flex flex-wrap justify-between items-center p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
               <div class="flex items-center gap-2">
@@ -1095,6 +1111,7 @@
                 </button>
                 <span class="font-bold text-slate-800 text-base">${escapeHtml(o.user_name)}</span>
                 <span class="text-slate-500 font-extrabold">($${o.total_price})</span>
+                ${changeBadge}
               </div>
               <div class="text-xs text-slate-600 flex-1 px-2">${sortedItems.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</div>
               <div class="flex gap-1.5">
@@ -1137,13 +1154,25 @@
 
       // 如果本來是未付款，按下去時加入找零計算功能
       if (!order.is_paid) {
-        const input = prompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元\n請輸入實收金額（例如 500 或 1000）：`, order.total_price);
+        const input = prompt(`【現場找錢計算機】
+應付金額：$${order.total_price} 元
+請輸入實收金額（例如 500 或 1000）：`, order.total_price);
         if (input === null) return; // 點選取消則不變動
         const received = parseInt(input);
         if (isNaN(received)) return alert('請輸入有效的數字金額！');
         if (received < order.total_price) return alert('實收金額小於應付金額！');
         const change = received - order.total_price;
-        alert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
+        
+        // 記錄找零資訊到 localStorage 供畫面長久顯示
+        localStorage.setItem(`order_change_${id}`, change);
+        localStorage.setItem(`order_received_${id}`, received);
+
+        alert(`💡 找零金額：$${change} 元
+（確認後將標記為已付款）`);
+      } else {
+        // 取消已付款狀態時，清除找零紀錄
+        localStorage.removeItem(`order_change_${id}`);
+        localStorage.removeItem(`order_received_${id}`);
       }
 
       // 切換付款狀態（已付款 <-> 未付款）並同步更新到資料庫
@@ -1162,6 +1191,8 @@
       const order = allOrders.find(o => String(o.id) === String(id));
       const name = order ? order.user_name : '';
       if (!confirm(`確定要刪除 ${name} 的整筆訂單嗎？`)) return;
+      localStorage.removeItem(`order_change_${id}`);
+      localStorage.removeItem(`order_received_${id}`);
       const { error } = await sb.from('orders').delete().eq('id', id);
       if (error) { alert(`❌ 刪除失敗：${error.message}`); return; }
       await fetchOrders();
@@ -1236,13 +1267,16 @@
     // ---------- 匯出 / 列印 ----------
     function exportExcel() {
       if (viewMode === 'person') {
-        const rows = allOrders.map(o => ({
-          '姓名': o.user_name,
-          '訂購明細': mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('; '),
-          '總金額': o.total_price,
-          '付款狀態': o.is_paid ? '已付款' : '未付款',
-          '核對簽名欄': ''
-        }));
+        const rows = allOrders.map(o => {
+          const changeVal = localStorage.getItem(`order_change_${o.id}`);
+          return {
+            '姓名': o.user_name,
+            '訂購明細': mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('; '),
+            '總金額': o.total_price,
+            '付款狀態': o.is_paid ? (changeVal !== null ? `已付款 (找零$${changeVal})` : '已付款') : '未付款',
+            '核對簽名欄': ''
+          };
+        });
         const worksheet = XLSX.utils.json_to_sheet(rows);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "按個人對帳");
@@ -1280,17 +1314,21 @@
           <th class="border border-black p-2 w-28">姓名</th>
           <th class="border border-black p-2">訂購明細與規格</th>
           <th class="border border-black p-2 text-right w-24">應付金額</th>
-          <th class="border border-black p-2 text-center w-20">狀態</th>
+          <th class="border border-black p-2 text-center w-28">付款/找零狀態</th>
         `;
-        tbody.innerHTML = allOrders.map(o => `
-          <tr>
-            <td class="border border-black p-2 text-center">☐</td>
-            <td class="border border-black p-2 font-bold">${escapeHtml(o.user_name)}</td>
-            <td class="border border-black p-2">${mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</td>
-            <td class="border border-black p-2 text-right font-bold">$${o.total_price}</td>
-            <td class="border border-black p-2 text-center">${o.is_paid ? '已付' : '未付'}</td>
-          </tr>
-        `).join('');
+        tbody.innerHTML = allOrders.map(o => {
+          const changeVal = localStorage.getItem(`order_change_${o.id}`);
+          const statusText = o.is_paid ? (changeVal !== null ? `已付 (找$${changeVal})` : '已付') : '未付';
+          return `
+            <tr>
+              <td class="border border-black p-2 text-center">☐</td>
+              <td class="border border-black p-2 font-bold">${escapeHtml(o.user_name)}</td>
+              <td class="border border-black p-2">${mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</td>
+              <td class="border border-black p-2 text-right font-bold">$${o.total_price}</td>
+              <td class="border border-black p-2 text-center font-medium">${statusText}</td>
+            </tr>
+          `;
+        }).join('');
       } else {
         titleEle.innerText = '團購餐點發放清單（按餐點發放）';
         headerEle.innerHTML = `
