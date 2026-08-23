@@ -286,6 +286,22 @@
 
   <!-- ================= 彈窗模組 (Modals) ================= -->
 
+  <!-- 全站自訂彈窗 (取代 alert / confirm / prompt) -->
+  <div id="custom-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-200">
+      <div class="flex items-center gap-2 border-b pb-3">
+        <span class="text-xl">💡</span>
+        <h3 id="custom-modal-title" class="font-bold text-base text-slate-800">團購點餐系統 顯示</h3>
+      </div>
+      <div id="custom-modal-body" class="text-sm text-slate-600 space-y-3">
+        <!-- 訊息或輸入框 -->
+      </div>
+      <div id="custom-modal-footer" class="flex justify-end gap-2 pt-2 border-t">
+        <!-- 按鈕 -->
+      </div>
+    </div>
+  </div>
+
   <!-- 0. 完整菜單大圖燈箱彈窗 -->
   <div id="menu-lightbox-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl max-w-3xl w-full p-4 space-y-3 max-h-[95vh] flex flex-col shadow-2xl relative">
@@ -345,6 +361,80 @@
   </div>
 
   <script>
+    // ---------- 自訂彈窗替代原生 alert/confirm/prompt ----------
+    function showCustomAlert(message) {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('custom-modal');
+        document.getElementById('custom-modal-title').innerText = '團購點餐系統 顯示';
+        document.getElementById('custom-modal-body').innerHTML = `<p>${message.replace(/\n/g, '<br>')}</p>`;
+        document.getElementById('custom-modal-footer').innerHTML = `
+          <button id="modal-ok-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg transition">確定</button>
+        `;
+        modal.classList.remove('hidden');
+        document.getElementById('modal-ok-btn').onclick = () => {
+          modal.classList.add('hidden');
+          resolve(true);
+        };
+      });
+    }
+
+    function showCustomConfirm(message) {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('custom-modal');
+        document.getElementById('custom-modal-title').innerText = '團購點餐系統 顯示';
+        document.getElementById('custom-modal-body').innerHTML = `<p>${message.replace(/\n/g, '<br>')}</p>`;
+        document.getElementById('custom-modal-footer').innerHTML = `
+          <button id="modal-cancel-btn" class="px-4 py-2 border border-slate-300 text-slate-600 text-sm font-semibold rounded-lg hover:bg-slate-50 transition">取消</button>
+          <button id="modal-confirm-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg transition">確定</button>
+        `;
+        modal.classList.remove('hidden');
+        document.getElementById('modal-cancel-btn').onclick = () => {
+          modal.classList.add('hidden');
+          resolve(false);
+        };
+        document.getElementById('modal-confirm-btn').onclick = () => {
+          modal.classList.add('hidden');
+          resolve(true);
+        };
+      });
+    }
+
+    function showCustomPrompt(message, defaultValue = '') {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('custom-modal');
+        document.getElementById('custom-modal-title').innerText = '團購點餐系統 顯示';
+        document.getElementById('custom-modal-body').innerHTML = `
+          <p class="mb-2">${message.replace(/\n/g, '<br>')}</p>
+          <input type="text" id="custom-prompt-input" value="${defaultValue}" class="w-full border border-slate-300 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
+        `;
+        document.getElementById('custom-modal-footer').innerHTML = `
+          <button id="modal-cancel-btn" class="px-4 py-2 border border-slate-300 text-slate-600 text-sm font-semibold rounded-lg hover:bg-slate-50 transition">取消</button>
+          <button id="modal-confirm-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg transition">確定</button>
+        `;
+        modal.classList.remove('hidden');
+        const inputEle = document.getElementById('custom-prompt-input');
+        inputEle.focus();
+        inputEle.select();
+
+        document.getElementById('modal-cancel-btn').onclick = () => {
+          modal.classList.add('hidden');
+          resolve(null);
+        };
+        document.getElementById('modal-confirm-btn').onclick = () => {
+          const val = inputEle.value;
+          modal.classList.add('hidden');
+          resolve(val);
+        };
+        inputEle.onkeydown = (e) => {
+          if (e.key === 'Enter') {
+            const val = inputEle.value;
+            modal.classList.add('hidden');
+            resolve(val);
+          }
+        };
+      });
+    }
+
     const SUPABASE_URL = "https://imuyohxrtyarclgzrole.supabase.co";
     const SUPABASE_KEY = "sb_publishable_Qv7AV8g5EhjVnT795Qm-qA_ZuJK772Y";
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -474,7 +564,7 @@
     }
 
     // 重新排序功能：依分單排序（第1單、第2單...不分單放後面）
-    function sortOrdersBySubGroup() {
+    async function sortOrdersBySubGroup() {
       allOrders.sort((a, b) => {
         let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : 999;
         let sgB = (b.sub_group !== null && b.sub_group !== undefined && b.sub_group > 0) ? b.sub_group : 999;
@@ -483,7 +573,7 @@
       });
       renderOrdersSection();
       renderPrintTable();
-      alert('🔄 已完成重新排序：相同分單的訂單已集中排列！');
+      await showCustomAlert('🔄 已完成重新排序：相同分單的訂單已集中排列！');
     }
 
     // 燈箱控制
@@ -692,8 +782,11 @@
     }
 
     // ---------- 購物車 ----------
-    function addToCart(menuIdx) {
-      if (!isOrderingOpen) return alert('已結單，停止接收新訂單！');
+    async function addToCart(menuIdx) {
+      if (!isOrderingOpen) {
+        await showCustomAlert('已結單，停止接收新訂單！');
+        return;
+      }
       const details = getItemCalculatedDetails(menuIdx);
       if (!details) return;
 
@@ -761,10 +854,19 @@
     }
 
     async function submitOrder() {
-      if (!isOrderingOpen) return alert('本次團購已結單！');
+      if (!isOrderingOpen) {
+        await showCustomAlert('本次團購已結單！');
+        return;
+      }
       const name = document.getElementById('user-name-input').value.trim();
-      if (!name) return alert('請先輸入訂購人姓名！');
-      if (userCart.length === 0) return alert('購物車是空的！');
+      if (!name) {
+        await showCustomAlert('請先輸入訂購人姓名！');
+        return;
+      }
+      if (userCart.length === 0) {
+        await showCustomAlert('購物車是空的！');
+        return;
+      }
 
       const submitBtn = document.getElementById('submit-order-btn');
       submitBtn.disabled = true;
@@ -788,9 +890,9 @@
 
         if (error) {
           console.error('Supabase 寫入失敗:', error);
-          alert(`❌ 訂單送出失敗：${error.message || '請確認資料庫權限或網路連線！'}`);
+          await showCustomAlert(`❌ 訂單送出失敗：${error.message || '請確認資料庫權限或網路連線！'}`);
         } else {
-          alert(`🎉 訂購成功！${name} 應付 $${total} 元`);
+          await showCustomAlert(`🎉 訂購成功！${name} 應付 $${total} 元`);
           
           document.getElementById('search-menu-input').value = '';
           document.getElementById('selected-item-panel').classList.add('hidden');
@@ -799,7 +901,7 @@
         }
       } catch (err) {
         console.error('送出訂單發生例外:', err);
-        alert('❌ 送出失敗，請稍後再試！');
+        await showCustomAlert('❌ 送出失敗，請稍後再試！');
       } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = '🚀 確認送出訂單';
@@ -808,7 +910,7 @@
 
     // ---------- 管理者登入 / 密碼與面板控制 ----------
     async function toggleAdminAuth() {
-      const pwd = prompt("請輸入管理者密碼：");
+      const pwd = await showCustomPrompt("請輸入管理者密碼：");
       if (!pwd) return;
 
       try {
@@ -826,7 +928,7 @@
         console.error('驗證密碼發生錯誤:', e);
       }
 
-      alert("密碼錯誤！");
+      await showCustomAlert("密碼錯誤！");
     }
 
     function switchToAdminView() {
@@ -862,11 +964,12 @@
       const val = document.getElementById('cutoff-time-input').value.trim();
       await sb.from('settings').upsert({ key: 'cutoff_time', value: JSON.stringify(val) });
       document.getElementById('broadcast-bar').innerText = `📢 預計 ${val} 結單，請儘速下單！`;
-      alert('預計結單時間已廣播！');
+      await showCustomAlert('預計結單時間已廣播！');
     }
 
     async function startNewGroup() {
-      if (!confirm('確定要清空目前所有訂單並開啟新一團嗎？（先前訂單將歸檔保留，不會被刪除）')) return;
+      const confirmNew = await showCustomConfirm('確定要清空目前所有訂單並開啟新一團嗎？（先前訂單將歸檔保留，不會被刪除）');
+      if (!confirmNew) return;
 
       const newGroupId = crypto.randomUUID();
       await sb.from('settings').upsert({ key: 'current_group_id', value: JSON.stringify(newGroupId) });
@@ -876,7 +979,7 @@
       await sb.from('orders').delete().lt('created_at', thirtyDaysAgo);
 
       await fetchOrders();
-      alert('已開啟新一團！歷史訂單已歸檔，超過 30 天的舊訂單已自動清理。');
+      await showCustomAlert('已開啟新一團！歷史訂單已歸檔，超過 30 天的舊訂單已自動清理。');
     }
 
     function openChangePasswordModal() { document.getElementById('password-modal').classList.remove('hidden'); }
@@ -887,9 +990,9 @@
       const new1 = document.getElementById('pwd-new1').value;
       const new2 = document.getElementById('pwd-new2').value;
 
-      if (!oldP) return alert('請輸入舊密碼！');
-      if (!new1) return alert('新密碼不可為空！');
-      if (new1 !== new2) return alert('兩次新密碼輸入不一致！');
+      if (!oldP) { await showCustomAlert('請輸入舊密碼！'); return; }
+      if (!new1) { await showCustomAlert('新密碼不可為空！'); return; }
+      if (new1 !== new2) { await showCustomAlert('兩次新密碼輸入不一致！'); return; }
 
       try {
         const { data, error } = await sb.from('settings').select('value').eq('key', 'admin_password').maybeSingle();
@@ -899,22 +1002,24 @@
         }
 
         if (oldP !== currentDbPassword) {
-          return alert('舊密碼不正確！');
+          await showCustomAlert('舊密碼不正確！');
+          return;
         }
 
         const { error: updateError } = await sb.from('settings').upsert({ key: 'admin_password', value: JSON.stringify(new1) });
         if (updateError) {
-          return alert(`密碼修改失敗：${updateError.message}`);
+          await showCustomAlert(`密碼修改失敗：${updateError.message}`);
+          return;
         }
 
-        alert('密碼修改成功！');
+        await showCustomAlert('密碼修改成功！');
         document.getElementById('pwd-old').value = '';
         document.getElementById('pwd-new1').value = '';
         document.getElementById('pwd-new2').value = '';
         closePasswordModal();
       } catch (err) {
         console.error('修改密碼發生異常:', err);
-        alert('密碼修改失敗，請檢查網路連線或系統設定！');
+        await showCustomAlert('密碼修改失敗，請檢查網路連線或系統設定！');
       }
     }
 
@@ -938,7 +1043,10 @@
     function uploadExcelMenu() {
       const fileInput = document.getElementById('excel-file-input');
       const file = fileInput.files[0];
-      if (!file) return alert('請選擇 .xlsx 或 .xls 檔案！');
+      if (!file) {
+        showCustomAlert('請選擇 .xlsx 或 .xls 檔案！');
+        return;
+      }
 
       const menuImageUrl = document.getElementById('input-menu-image-url').value.trim();
       const deliveryThreshold = document.getElementById('input-delivery-threshold').value.trim();
@@ -962,7 +1070,7 @@
         }).filter(i => i.name && i.name !== '未命名' && i.price >= 0);
 
         if (menuItems.length === 0) {
-          alert('未解析到有效品項，請確認 Excel 欄位名稱是否為「品項」與「價格」！');
+          await showCustomAlert('未解析到有效品項，請確認 Excel 欄位名稱是否為「品項」與「價格」！');
           return;
         }
 
@@ -979,11 +1087,11 @@
         });
 
         if (error) {
-          alert(`❌ 菜單上傳失敗：${error.message}`);
+          await showCustomAlert(`❌ 菜單上傳失敗：${error.message}`);
           return;
         }
 
-        alert(`菜單【${menuName}】上傳成功並設為當前啟用！`);
+        await showCustomAlert(`菜單【${menuName}】上傳成功並設為當前啟用！`);
         fileInput.value = '';
         document.getElementById('input-menu-image-url').value = '';
         document.getElementById('input-delivery-threshold').value = '';
@@ -1033,30 +1141,46 @@
     }
 
     async function switchMenu() {
-      if (!selectedHistoryMenuId) return alert('請先從清單中搜尋並點選要啟用的菜單！');
+      if (!selectedHistoryMenuId) {
+        await showCustomAlert('請先從清單中搜尋並點選要啟用的菜單！');
+        return;
+      }
       await sb.from('menus').update({ is_active: false }).neq('id', '00000000-0000-0000-0000-000000000000');
       await sb.from('menus').update({ is_active: true }).eq('id', selectedHistoryMenuId);
       await fetchActiveMenu();
-      alert('已切換當前啟用菜單！');
+      await showCustomAlert('已切換當前啟用菜單！');
     }
 
     async function deleteMenu() {
-      if (!selectedHistoryMenuId) return alert('請先從清單中搜尋並點選要刪除的菜單！');
-      if (!confirm('確定要永久刪除此菜單嗎？')) return;
+      if (!selectedHistoryMenuId) {
+        await showCustomAlert('請先從清單中搜尋並點選要刪除的菜單！');
+        return;
+      }
+      const confirmDelete = await showCustomConfirm('確定要永久刪除此菜單嗎？');
+      if (!confirmDelete) return;
       await sb.from('menus').delete().eq('id', selectedHistoryMenuId);
       await fetchActiveMenu();
-      alert('菜單已刪除！');
+      await showCustomAlert('菜單已刪除！');
     }
 
     async function downloadCurrentMenu() {
       const targetMenuId = selectedHistoryMenuId || currentActiveMenuId;
-      if (!targetMenuId) return alert('請先選擇或啟用要下載的菜單！');
+      if (!targetMenuId) {
+        await showCustomAlert('請先選擇或啟用要下載的菜單！');
+        return;
+      }
 
       const { data, error } = await sb.from('menus').select('*').eq('id', targetMenuId).single();
-      if (error || !data) return alert('無法讀取該菜單資料！');
+      if (error || !data) {
+        await showCustomAlert('無法讀取該菜單資料！');
+        return;
+      }
 
       const menuList = data.data || [];
-      if (!menuList.length) return alert('此菜單無任何品項可匯出！');
+      if (!menuList.length) {
+        await showCustomAlert('此菜單無任何品項可匯出！');
+        return;
+      }
 
       const rows = menuList.map(item => {
         const specStr = item.sizes ? item.sizes.map(s => `${s.name}:${s.extra}`).join('/') : '';
@@ -1220,7 +1344,7 @@
       }
     }
 
-    function copyLineMessage() {
+    async function copyLineMessage() {
       const subGroups = {};
       const categoryMap = getCategoryMap();
 
@@ -1286,7 +1410,7 @@
       }
 
       navigator.clipboard.writeText(text);
-      alert('📋 已成功將帶有分單標題的 Line 報餐訊息複製至剪貼簿！');
+      await showCustomAlert('📋 已成功將帶有分單標題的 Line 報餐訊息複製至剪貼簿！');
     }
 
     // ---------- 收錢 / 對帳 ----------
@@ -1302,7 +1426,7 @@
       const subGroupNum = parseInt(val) || 0;
       const { error } = await sb.from('orders').update({ sub_group: subGroupNum }).eq('id', orderId);
       if (error) {
-        alert(`❌ 更新分單失敗：${error.message}`);
+        await showCustomAlert(`❌ 更新分單失敗：${error.message}`);
         return;
       }
       await fetchOrders();
@@ -1400,23 +1524,32 @@
 
     async function togglePaid(id) {
       const order = allOrders.find(o => String(o.id) === String(id));
-      if (!order) { alert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); return; }
+      if (!order) { 
+        await showCustomAlert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); 
+        return; 
+      }
 
       if (!order.is_paid) {
-        const input = prompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元\n請輸入實收金額（例如 500 或 1000）：`, order.total_price);
+        const input = await showCustomPrompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元\n請輸入實收金額（例如 500 或 1000）：`, order.total_price);
         if (input === null) return;
         const received = parseInt(input);
-        if (isNaN(received)) return alert('請輸入有效的數字金額！');
-        if (received < order.total_price) return alert('實收金額小於應付金額！');
+        if (isNaN(received)) {
+          await showCustomAlert('請輸入有效的數字金額！');
+          return;
+        }
+        if (received < order.total_price) {
+          await showCustomAlert('實收金額小於應付金額！');
+          return;
+        }
         const change = received - order.total_price;
         
         localStorage.setItem(`order_change_${id}`, change);
         localStorage.setItem(`order_received_${id}`, received);
 
         if (change > 0) {
-          alert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
+          await showCustomAlert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
         } else {
-          alert(`💡 剛好付清，無需找零！\n（確認後將標記為已付款）`);
+          await showCustomAlert(`💡 剛好付清，無需找零！\n（確認後將標記為已付款）`);
         }
       } else {
         localStorage.removeItem(`order_change_${id}`);
@@ -1427,7 +1560,7 @@
       const { error } = await sb.from('orders').update({ is_paid: newPaidStatus }).eq('id', id);
       
       if (error) {
-        alert(`❌ 更新付款狀態失敗：${error.message}`);
+        await showCustomAlert(`❌ 更新付款狀態失敗：${error.message}`);
         return;
       }
       
@@ -1437,18 +1570,25 @@
     async function deleteOrder(id) {
       const order = allOrders.find(o => String(o.id) === String(id));
       const name = order ? order.user_name : '';
-      if (!confirm(`確定要刪除 ${name} 的整筆訂單嗎？`)) return;
+      const confirmDel = await showCustomConfirm(`確定要刪除 ${name} 的整筆訂單嗎？`);
+      if (!confirmDel) return;
       localStorage.removeItem(`order_change_${id}`);
       localStorage.removeItem(`order_received_${id}`);
       const { error } = await sb.from('orders').delete().eq('id', id);
-      if (error) { alert(`❌ 刪除失敗：${error.message}`); return; }
+      if (error) { 
+        await showCustomAlert(`❌ 刪除失敗：${error.message}`); 
+        return; 
+      }
       await fetchOrders();
     }
 
     // ---------- 訂單修改彈窗 ----------
-    function openEditModal(id) {
+    async function openEditModal(id) {
       const order = allOrders.find(o => String(o.id) === String(id));
-      if (!order) { alert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); return; }
+      if (!order) { 
+        await showCustomAlert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); 
+        return; 
+      }
       editingOrderId = id;
       editingItems = mergeCartItems(JSON.parse(JSON.stringify(order.items)));
 
@@ -1503,7 +1643,7 @@
 
       const { error } = await sb.from('orders').update({ items: finalEditingItems, total_price: total }).eq('id', editingOrderId);
       if (error) {
-        alert(`❌ 儲存修改失敗：${error.message}`);
+        await showCustomAlert(`❌ 儲存修改失敗：${error.message}`);
         return;
       }
       
