@@ -366,6 +366,7 @@
     let editingOrderId = null;
     let editingItems = [];
     let selectedMenuIndex = null;
+    let isAdminLoggedIn = false; // 追蹤後台登入狀態
 
     const DRINK_KEYWORDS = ['茶','咖啡','可樂','汽水','果汁','豆漿','奶茶','可可','紅茶','綠茶','冬瓜','紅葉','珍奶','飲料','奶昔','氣泡水','沙士','湯','羹','味噌湯','玉米濃湯','清湯','酸辣湯','牛肉湯'];
     const DIET_WARNING_KEYWORDS = ['素','全素','蔬食','過敏','禁忌','不吃','不含'];
@@ -449,8 +450,6 @@
 
         document.getElementById('app-title-text').innerText = `【 ${data[0].name} 】`;
         document.getElementById('active-menu-name').innerText = data[0].name;
-        
-        // 移除了前台的門檻顯示文字，保持乾淨
       } else {
         currentActiveMenuId = null;
         currentMenuData = [];
@@ -794,9 +793,7 @@
         } else {
           alert(`🎉 訂購成功！${name} 應付 $${total} 元`);
           
-          userCart = [];
-          renderCart();
-          document.getElementById('user-name-input').value = '';
+          // 修改處：不主動清空 userCart 與 user-name-input，讓訂購人可以繼續掌握訂單資訊
           document.getElementById('search-menu-input').value = '';
           document.getElementById('selected-item-panel').classList.add('hidden');
 
@@ -812,11 +809,10 @@
     }
 
     // ---------- 管理者登入 / 密碼與面板控制 ----------
-    let isAdminLoggedIn = false;
-
     async function toggleAdminAuth() {
+      // 如果已經登入過，則執行「切換前台」
       if (isAdminLoggedIn) {
-        closeAdmin();
+        switchToUserView();
         return;
       }
 
@@ -832,14 +828,7 @@
 
         if (pwd === dbPassword) {
           isAdminLoggedIn = true;
-          document.getElementById('admin-section').classList.remove('hidden');
-          document.getElementById('user-section').classList.add('hidden');
-          
-          const navAuthContainer = document.getElementById('nav-auth-container');
-          navAuthContainer.innerHTML = `
-            <button onclick="openChangePasswordModal()" class="bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">修改密碼</button>
-            <button onclick="toggleAdminAuth()" class="bg-rose-700 hover:bg-rose-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">退出後台</button>
-          `;
+          switchToAdminView();
           return;
         }
       } catch(e) {
@@ -849,8 +838,18 @@
       alert("密碼錯誤！");
     }
 
-    function closeAdmin() {
-      isAdminLoggedIn = false;
+    function switchToAdminView() {
+      document.getElementById('admin-section').classList.remove('hidden');
+      document.getElementById('user-section').classList.add('hidden');
+      
+      const navAuthContainer = document.getElementById('nav-auth-container');
+      navAuthContainer.innerHTML = `
+        <button onclick="openChangePasswordModal()" class="bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">修改密碼</button>
+        <button onclick="toggleAdminAuth()" class="bg-rose-700 hover:bg-rose-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">切換前台</button>
+      `;
+    }
+
+    function switchToUserView() {
       document.getElementById('admin-section').classList.add('hidden');
       document.getElementById('user-section').classList.remove('hidden');
       
@@ -1085,11 +1084,10 @@
       const worksheet = XLSX.utils.json_to_sheet(rows);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "菜單");
-      // 修改：只保留「店家名稱」與上傳檔案一致，去掉了"_菜單"
       XLSX.writeFile(workbook, `${data.name}.xlsx`);
     }
 
-    // ---------- 外送資訊 (已設定預設資料與動態日期) ----------
+    // ---------- 外送資訊 ----------
     function getTodayFormattedTime() {
       const now = new Date();
       const month = now.getMonth() + 1;
@@ -1247,38 +1245,25 @@
         return a.localeCompare(b, 'zh-Hant', { numeric: true });
       });
 
-      let text = `【團購訂餐報餐明細】
-`;
-      text += `訂購單位：${document.getElementById('info-unit').value}
-`;
-      text += `外送地址：${document.getElementById('info-address').value}
-`;
-      text += `聯絡電話：${document.getElementById('info-phone').value}
-`;
-      text += `訂購人：${document.getElementById('info-contact').value}
-`;
-      text += `外送時間：${document.getElementById('info-time').value}
-`;
-      text += `------------------------
-`;
+      let text = `【團購訂餐報餐明細】\n`;
+      text += `訂購單位：${document.getElementById('info-unit').value}\n`;
+      text += `外送地址：${document.getElementById('info-address').value}\n`;
+      text += `聯絡電話：${document.getElementById('info-phone').value}\n`;
+      text += `訂購人：${document.getElementById('info-contact').value}\n`;
+      text += `外送時間：${document.getElementById('info-time').value}\n`;
+      text += `------------------------\n`;
 
       if (sortedSGs.length === 1 && sortedSGs[0] === '不分單') {
         const { summary, specialNotes, totalAmount, mealCount, drinkCount } = computeSummary();
         const sortedKeys = Object.keys(summary).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-        sortedKeys.forEach(k => text += `${k} x ${summary[k]}
-`);
+        sortedKeys.forEach(k => text += `${k} x ${summary[k]}\n`);
 
         if (specialNotes.length > 0) {
-          text += `------------------------
-⚠️ 特殊備註：
-`;
-          specialNotes.forEach(n => text += `${n}
-`);
+          text += `------------------------\n⚠️ 特殊備註：\n`;
+          specialNotes.forEach(n => text += `${n}\n`);
         }
-        text += `------------------------
-`;
-        text += `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份
-`;
+        text += `------------------------\n`;
+        text += `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份\n`;
         text += `總金額：$${totalAmount} 元`;
       } else {
         sortedSGs.forEach(sgName => {
@@ -1298,15 +1283,11 @@
             });
           });
 
-          text += `📌 【${sgName}】
-`;
+          text += `📌 【${sgName}】\n`;
           const sortedKeys = Object.keys(groupSummary).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-          sortedKeys.forEach(k => text += `• ${k} x ${groupSummary[k]}
-`);
-          text += `小計：餐點 ${groupMeal} 份 ｜ 金額 $${groupTotal} 元
-`;
-          text += `------------------------
-`;
+          sortedKeys.forEach(k => text += `• ${k} x ${groupSummary[k]}\n`);
+          text += `小計：餐點 ${groupMeal} 份 ｜ 金額 $${groupTotal} 元\n`;
+          text += `------------------------\n`;
         });
 
         const { totalAmount, mealCount, drinkCount } = computeSummary();
@@ -1431,9 +1412,7 @@
       if (!order) { alert('⚠️ 找不到這筆訂單，請重新整理頁面後再試一次'); return; }
 
       if (!order.is_paid) {
-        const input = prompt(`【現場找錢計算機】
-應付金額：$${order.total_price} 元
-請輸入實收金額（例如 500 或 1000）：`, order.total_price);
+        const input = prompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元\n請輸入實收金額（例如 500 或 1000）：`, order.total_price);
         if (input === null) return;
         const received = parseInt(input);
         if (isNaN(received)) return alert('請輸入有效的數字金額！');
@@ -1444,11 +1423,9 @@
         localStorage.setItem(`order_received_${id}`, received);
 
         if (change > 0) {
-          alert(`💡 找零金額：$${change} 元
-（確認後將標記為已付款）`);
+          alert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
         } else {
-          alert(`💡 剛好付清，無需找零！
-（確認後將標記為已付款）`);
+          alert(`💡 剛好付清，無需找零！\n（確認後將標記為已付款）`);
         }
       } else {
         localStorage.removeItem(`order_change_${id}`);
@@ -1543,7 +1520,7 @@
       await fetchOrders();
     }
 
-    // ---------- 匯出 / 列印 (依目前排序輸出) ----------
+    // ---------- 匯出 / 列印 ----------
     function exportExcel() {
       if (viewMode === 'person') {
         const rows = allOrders.map(o => {
