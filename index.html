@@ -366,7 +366,6 @@
     let editingOrderId = null;
     let editingItems = [];
     let selectedMenuIndex = null;
-    let isAdminLoggedIn = false; // 追蹤後台登入狀態
 
     const DRINK_KEYWORDS = ['茶','咖啡','可樂','汽水','果汁','豆漿','奶茶','可可','紅茶','綠茶','冬瓜','紅葉','珍奶','飲料','奶昔','氣泡水','沙士','湯','羹','味噌湯','玉米濃湯','清湯','酸辣湯','牛肉湯'];
     const DIET_WARNING_KEYWORDS = ['素','全素','蔬食','過敏','禁忌','不吃','不含'];
@@ -793,7 +792,6 @@
         } else {
           alert(`🎉 訂購成功！${name} 應付 $${total} 元`);
           
-          // 修改處：不主動清空 userCart 與 user-name-input，讓訂購人可以繼續掌握訂單資訊
           document.getElementById('search-menu-input').value = '';
           document.getElementById('selected-item-panel').classList.add('hidden');
 
@@ -810,12 +808,6 @@
 
     // ---------- 管理者登入 / 密碼與面板控制 ----------
     async function toggleAdminAuth() {
-      // 如果已經登入過，則執行「切換前台」
-      if (isAdminLoggedIn) {
-        switchToUserView();
-        return;
-      }
-
       const pwd = prompt("請輸入管理者密碼：");
       if (!pwd) return;
 
@@ -827,7 +819,6 @@
         }
 
         if (pwd === dbPassword) {
-          isAdminLoggedIn = true;
           switchToAdminView();
           return;
         }
@@ -845,7 +836,7 @@
       const navAuthContainer = document.getElementById('nav-auth-container');
       navAuthContainer.innerHTML = `
         <button onclick="openChangePasswordModal()" class="bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">修改密碼</button>
-        <button onclick="toggleAdminAuth()" class="bg-rose-700 hover:bg-rose-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">切換前台</button>
+        <button onclick="switchToUserView()" class="bg-rose-700 hover:bg-rose-800 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition">切換前台</button>
       `;
     }
 
