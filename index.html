@@ -376,6 +376,13 @@
       await fetchSettings();
       await fetchActiveMenu();
       await fetchOrders();
+      
+      // 檢查是否已在 sessionStorage 中登入過後台
+      if (sessionStorage.getItem('admin_logged_in') === 'true') {
+        isAdminLoggedIn = true;
+        updateAdminNavUI();
+      }
+
       document.addEventListener('click', (e) => {
         const historyWrap = document.getElementById('history-menu-search')?.parentElement;
         if (historyWrap && !historyWrap.contains(e.target)) {
@@ -815,8 +822,9 @@
     let isAdminLoggedIn = false;
 
     async function toggleAdminAuth() {
+      // 如果已經登入，點擊按鈕代表「切換前台」
       if (isAdminLoggedIn) {
-        closeAdmin();
+        switchToUserView();
         return;
       }
 
@@ -832,14 +840,9 @@
 
         if (pwd === dbPassword) {
           isAdminLoggedIn = true;
-          document.getElementById('admin-section').classList.remove('hidden');
-          document.getElementById('user-section').classList.add('hidden');
-          
-          const navAuthContainer = document.getElementById('nav-auth-container');
-          navAuthContainer.innerHTML = `
-            <button onclick="openChangePasswordModal()" class="bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">修改密碼</button>
-            <button onclick="toggleAdminAuth()" class="bg-rose-700 hover:bg-rose-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">退出後台</button>
-          `;
+          // 記錄到 sessionStorage，確保只要網頁/分頁不關閉，就不需重複輸入密碼
+          sessionStorage.setItem('admin_logged_in', 'true');
+          switchToAdminView();
           return;
         }
       } catch(e) {
@@ -849,8 +852,13 @@
       alert("密碼錯誤！");
     }
 
-    function closeAdmin() {
-      isAdminLoggedIn = false;
+    function switchToAdminView() {
+      document.getElementById('admin-section').classList.remove('hidden');
+      document.getElementById('user-section').classList.add('hidden');
+      updateAdminNavUI();
+    }
+
+    function switchToUserView() {
       document.getElementById('admin-section').classList.add('hidden');
       document.getElementById('user-section').classList.remove('hidden');
       
@@ -859,6 +867,17 @@
         <button onclick="toggleAdminAuth()" id="btn-admin-toggle" class="bg-blue-700 hover:bg-blue-800 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition flex items-center gap-1">
           ⚙️ 團主管理
         </button>
+      `;
+    }
+
+    function updateAdminNavUI() {
+      document.getElementById('admin-section').classList.remove('hidden');
+      document.getElementById('user-section').classList.add('hidden');
+
+      const navAuthContainer = document.getElementById('nav-auth-container');
+      navAuthContainer.innerHTML = `
+        <button onclick="openChangePasswordModal()" class="bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">修改密碼</button>
+        <button onclick="toggleAdminAuth()" class="bg-amber-600 hover:bg-amber-700 px-3 py-1.5 rounded-lg text-xs font-semibold transition">切換前台</button>
       `;
     }
 
