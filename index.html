@@ -660,7 +660,10 @@
       document.getElementById('menu-dropdown-list').classList.add('hidden');
 
       const panel = document.getElementById('selected-item-panel');
-      const sizes = item.sizes && item.sizes.length ? item.sizes : [{ name: '標準', extra: 0 }];
+      // sizeGroups：規格「群組」陣列，每個群組是一組互斥（單選）的選項。
+      // 群組數量與內容皆來自 Excel「規格」欄位以分號 ";" 切割的結果。
+      const sizeGroups = item.sizes && item.sizes.length ? item.sizes : [];
+      const multiGroupSizes = sizeGroups.filter(g => g && g.length > 1);
       const addOns = item.addOns || [];
 
       panel.innerHTML = `
@@ -669,19 +672,23 @@
           <span class="text-sm font-extrabold text-rose-600">$${item.price}</span>
         </div>
 
-        ${sizes.length > 1 ? `
-          <div class="text-xs space-y-1">
-            <span class="font-bold text-slate-600">選擇規格：</span>
-            <div class="flex flex-wrap gap-3">
-              ${sizes.map((s, sIdx) => `
-                <label class="inline-flex items-center gap-1 cursor-pointer select-none">
-                  <input type="radio" name="size-${origIdx}" value="${sIdx}" ${sIdx===0?'checked':''} onchange="updateItemCalc(${origIdx})" class="text-blue-600">
-                  <span>${s.name} ${s.extra > 0 ? `(+$${s.extra})` : ''}</span>
-                </label>
-              `).join('')}
+        ${sizeGroups.map((group, gIdx) => {
+          // 群組內只有 1 個選項時，直接套用該選項，不需要顯示可選按鈕
+          if (!group || group.length <= 1) return '';
+          return `
+            <div class="text-xs space-y-1">
+              <span class="font-bold text-slate-600">選擇規格${multiGroupSizes.length > 1 ? ` (${gIdx + 1})` : ''}：</span>
+              <div class="flex flex-wrap gap-3">
+                ${group.map((s, sIdx) => `
+                  <label class="inline-flex items-center gap-1 cursor-pointer select-none">
+                    <input type="radio" name="size-${origIdx}-${gIdx}" value="${sIdx}" ${sIdx===0?'checked':''} onchange="updateItemCalc(${origIdx})" class="text-blue-600">
+                    <span>${s.name} ${s.extra > 0 ? `(+$${s.extra})` : ''}</span>
+                  </label>
+                `).join('')}
+              </div>
             </div>
-          </div>
-        ` : ''}
+          `;
+        }).join('')}
 
         ${addOns.length > 0 ? `
           <div class="text-xs space-y-1">
@@ -735,20 +742,23 @@
       let singleUnitPrice = item.price;
       let specNotes = [];
 
-      const sizes = item.sizes || [];
-      if (sizes.length > 1) {
-        const selectedSizeEle = document.querySelector(`input[name="size-${idx}"]:checked`);
-        if (selectedSizeEle) {
-          const sObj = sizes[parseInt(selectedSizeEle.value)];
-          if (sObj) {
-            singleUnitPrice += (sObj.extra || 0);
-            if (sObj.name !== '標準') specNotes.push(sObj.name);
-          }
+      // sizeGroups：每個群組各自獨立單選（例如 杯型 / 甜度 / 冰塊），
+      // 逐一取出每個群組目前選中的選項，價格加總、備註合併。
+      const sizeGroups = item.sizes || [];
+      sizeGroups.forEach((group, gIdx) => {
+        if (!group || !group.length) return;
+        let selectedOpt = null;
+        if (group.length > 1) {
+          const selectedEle = document.querySelector(`input[name="size-${idx}-${gIdx}"]:checked`);
+          selectedOpt = selectedEle ? group[parseInt(selectedEle.value)] : group[0];
+        } else {
+          selectedOpt = group[0];
         }
-      } else if (sizes.length === 1 && sizes[0].name !== '標準') {
-        singleUnitPrice += (sizes[0].extra || 0);
-        specNotes.push(sizes[0].name);
-      }
+        if (selectedOpt) {
+          singleUnitPrice += (selectedOpt.extra || 0);
+          if (selectedOpt.name !== '標準') specNotes.push(selectedOpt.name);
+        }
+      });
 
       const addOns = item.addOns || [];
       addOns.forEach((a, aIdx) => {
@@ -1110,9 +1120,10 @@
         const menuItems = json.map(row => {
           const name = row['品項'] || row['餐點'] || row['品名'] || '未命名';
           const price = parseInt(row['價格'] || row['單價'] || 0);
-          const rawSizes = parseSpecColumn(row['規格']);
-          // 支援多種規格欄位結構：若 parseSpecColumn 回傳雙重陣列，取第一組或扁平化處理
-          const sizes = rawSizes.length > 0 && Array.isArray(rawSizes[0]) ? rawSizes.flat() : rawSizes;
+          // 規格欄位：以分號 ";" 區分不同「規格群組」（例如 杯型 / 甜度 / 冰塊），
+          // 每個群組內再以斜線 "/" 區分該群組底下的可選項目。
+          // sizes 結構為「群組陣列」：[[{name,extra},...群組1選項], [{name,extra},...群組2選項], ...]
+          const sizes = parseSpecColumn(row['規格']);
           const addOns = parseAddOnColumn(row['加點'] || row['加點項目']);
           const rawCategory = (row['類別'] || row['分類'] || '').toString();
           const category = rawCategory.includes('飲') || rawCategory.includes('湯') ? 'drink' : (rawCategory.includes('餐') ? 'meal' : guessCategory(String(name)));
@@ -1234,7 +1245,8 @@
       }
 
       const rows = menuList.map(item => {
-        const specStr = item.sizes ? item.sizes.map(s => `${s.name}:${s.extra}`).join('/') : '';
+        // 匯出時還原格式：群組內用 "/" 串接選項，群組之間用 ";" 串接
+        const specStr = item.sizes ? item.sizes.map(group => (group || []).map(s => `${s.name}:${s.extra}`).join('/')).join(';') : '';
         const addOnStr = item.addOns ? item.addOns.map(a => `${a.name}:${a.price}`).join('/') : '';
         const categoryStr = item.category === 'drink' ? '飲料' : '餐點';
 
