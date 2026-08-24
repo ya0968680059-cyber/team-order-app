@@ -27,7 +27,7 @@
       <div>
         <h1 id="app-title" class="text-xl font-bold flex items-center gap-2">
           <span>🍔</span> <span id="app-title-text">團隊團購點餐系統</span>
-          <span id="room-badge" class="text-xs bg-blue-800 px-2 py-0.5 rounded-full font-semibold"></span>
+          <span id="room-badge" class="hidden text-xs bg-blue-800 px-2 py-0.5 rounded-full font-semibold"></span>
         </h1>
         <p id="broadcast-bar" class="text-xs text-blue-100 mt-0.5">📢 載入廣播資訊中...</p>
       </div>
@@ -472,7 +472,14 @@
     const DIET_WARNING_KEYWORDS = ['素','全素','蔬食','過敏','禁忌','不吃','不含'];
 
     async function init() {
-      document.getElementById('room-badge').innerText = ROOM !== 'default' ? `房間 ${ROOM}` : '';
+      const roomBadgeEl = document.getElementById('room-badge');
+      if (ROOM !== 'default') {
+        roomBadgeEl.innerText = `房間 ${ROOM}`;
+        roomBadgeEl.classList.remove('hidden');
+      } else {
+        roomBadgeEl.innerText = '';
+        roomBadgeEl.classList.add('hidden');
+      }
       loadDeliveryInfo();
       await ensureCurrentGroup();
       await fetchSettings();
@@ -926,7 +933,23 @@
     }
 
     // ---------- 管理者登入 / 密碼與面板控制 ----------
+    // 同一瀏覽器分頁（session）內，只要驗證成功過一次，之後在「切換前台／團主管理」之間切換就不用再重複輸入密碼。
+    // 關閉分頁或重新整理後，sessionStorage 會清空，需要重新輸入密碼（避免密碼被永久記住造成安全疑慮）。
+    const ADMIN_AUTH_KEY = roomKey('admin_authed');
+    function isAdminAuthed() {
+      return sessionStorage.getItem(ADMIN_AUTH_KEY) === 'true';
+    }
+    function setAdminAuthed() {
+      sessionStorage.setItem(ADMIN_AUTH_KEY, 'true');
+    }
+
     async function toggleAdminAuth() {
+      // 已在本次瀏覽階段驗證過密碼，直接進入後台，不再詢問。
+      if (isAdminAuthed()) {
+        switchToAdminView();
+        return;
+      }
+
       const pwd = await showCustomPrompt("請輸入管理者密碼：");
       if (!pwd) return;
 
@@ -938,6 +961,7 @@
         }
 
         if (pwd === dbPassword) {
+          setAdminAuthed();
           switchToAdminView();
           return;
         }
