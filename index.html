@@ -62,8 +62,7 @@
           <div onclick="openMenuLightbox()" class="cursor-pointer group flex items-center gap-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-xl transition shadow-sm">
             <span class="text-xl">🔍</span>
             <div class="text-left">
-              <div class="text-xs font-bold text-blue-700 group-hover:underline">點我看完整菜單</div>
-              <div class="text-[10px] text-slate-500" id="preview-threshold-text">查看品項與價格大圖</div>
+              <div class="text-xs font-bold text-blue-700 group-hover:underline">點我看菜單</div>
             </div>
           </div>
         </div>
@@ -144,12 +143,17 @@
               <label class="block text-xs font-semibold text-slate-600 mb-1">訂餐方式</label>
               <input type="text" id="input-order-info" placeholder="例如：電話或Line點餐" class="w-full border border-slate-300 p-2 rounded-lg text-xs outline-none bg-white">
             </div>
-            <div class="md:col-span-3 flex justify-end">
-              <button onclick="uploadExcelMenu()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2 rounded-lg shadow-sm transition">上傳新 Excel 菜單並儲存資訊</button>
+            <div class="md:col-span-3 flex flex-wrap justify-end gap-2">
+              <button onclick="updateMenuInfoOnly()" class="bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold px-5 py-2 rounded-lg shadow-sm transition">💾 只更新資訊（免上傳檔案）</button>
+              <button onclick="uploadExcelMenu()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2 rounded-lg shadow-sm transition">📤 上傳新 Excel 菜單並儲存資訊</button>
             </div>
           </div>
           <p class="text-[11px] text-slate-400 leading-relaxed">
             支援欄位：<b>品項</b>／<b>價格</b>／規格 (選填，格式 <code>中杯/大杯:15;正常甜/半糖:0</code>，使用分號 <code>;</code> 區隔不同規格)／加點 (選填，格式 <code>琥珀珍珠:15/功夫茶凍:15</code>)／類別 (選填)
+          </p>
+          <p class="text-[11px] text-blue-500 leading-relaxed">
+            💡 只想改「菜單圖片連結／配送門檻／訂餐方式」不想重傳菜單品項？請先在下方搜尋並點選要修改的菜單（欄位會自動帶入），改好後直接按「💾 只更新資訊」即可，不需要選擇檔案。<br>
+            💡 上傳 Excel 時，若「檔案名稱」與現有菜單店家名稱相同，系統會自動覆蓋更新該菜單（品項會換成新的），且圖片連結／配送門檻／訂餐方式欄位若留空，會自動沿用原本已儲存的資料，不需要重新輸入。
           </p>
 
           <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center pt-1">
@@ -304,15 +308,19 @@
   </div>
 
   <!-- 0. 完整菜單大圖燈箱彈窗 -->
-  <div id="menu-lightbox-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-3xl w-full p-4 space-y-3 max-h-[95vh] flex flex-col shadow-2xl relative">
+  <div id="menu-lightbox-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-2 sm:p-4">
+    <div class="bg-white rounded-2xl w-full h-full sm:max-w-6xl sm:w-[96vw] sm:h-[95vh] p-3 sm:p-4 space-y-2 flex flex-col shadow-2xl relative">
       <div class="flex justify-between items-center border-b pb-2">
         <h3 class="font-bold text-lg text-slate-800">📄 完整菜單大圖</h3>
-        <button onclick="closeMenuLightbox()" class="text-slate-400 hover:text-slate-600 font-bold text-2xl px-2">✕</button>
+        <div class="flex items-center gap-3">
+          <a id="lightbox-open-original" href="#" target="_blank" rel="noopener" class="hidden text-xs font-semibold text-blue-600 hover:underline whitespace-nowrap">🔗 開新分頁看原圖</a>
+          <button onclick="closeMenuLightbox()" class="text-slate-400 hover:text-slate-600 font-bold text-2xl px-2">✕</button>
+        </div>
       </div>
-      <div id="lightbox-content-area" class="flex-1 overflow-y-auto flex items-center justify-center min-h-[300px] bg-slate-50 rounded-xl p-2">
+      <div id="lightbox-content-area" class="flex-1 overflow-auto flex items-start justify-center min-h-[300px] bg-slate-50 rounded-xl p-2">
         <!-- 動態載入圖片或提示 -->
       </div>
+      <p class="text-[11px] text-slate-400 text-center">💡 圖片可縮放捲動查看細節；手機可用雙指縮放，或點右上角連結以瀏覽器原生大小開啟</p>
     </div>
   </div>
 
@@ -604,12 +612,34 @@
     function openMenuLightbox() {
       const modal = document.getElementById('menu-lightbox-modal');
       const area = document.getElementById('lightbox-content-area');
+      const originalLink = document.getElementById('lightbox-open-original');
       if (currentMenuImageUrl) {
-        area.innerHTML = `<img src="${currentMenuImageUrl}" alt="完整的菜單大圖" class="max-w-full max-h-[80vh] object-contain rounded-lg shadow">`;
+        // 預設以「寬度撐滿彈窗」顯示（比舊版大很多）；點擊圖片可切換成原始解析度並可捲動查看細節
+        area.innerHTML = `<img id="lightbox-img" src="${currentMenuImageUrl}" alt="完整的菜單大圖" onclick="toggleLightboxZoom()" class="w-full max-w-none h-auto rounded-lg shadow cursor-zoom-in mx-auto block">`;
+        originalLink.href = currentMenuImageUrl;
+        originalLink.classList.remove('hidden');
       } else {
         area.innerHTML = `<div class="text-slate-400 text-sm p-8 text-center">目前啟用的菜單未設定圖片連結 (menu_image_url)</div>`;
+        originalLink.classList.add('hidden');
       }
       modal.classList.remove('hidden');
+    }
+
+    // 點擊菜單圖片可在「撐滿寬度」與「100% 原始解析度（可捲動）」之間切換，避免圖片被強制縮小
+    function toggleLightboxZoom() {
+      const img = document.getElementById('lightbox-img');
+      if (!img) return;
+      if (img.classList.contains('is-zoomed')) {
+        img.classList.remove('is-zoomed');
+        img.classList.add('w-full');
+        img.style.width = '';
+        img.style.cursor = 'zoom-in';
+      } else {
+        img.classList.add('is-zoomed');
+        img.classList.remove('w-full');
+        img.style.width = 'auto';
+        img.style.cursor = 'zoom-out';
+      }
     }
 
     function closeMenuLightbox() {
@@ -1098,6 +1128,34 @@
       }).filter(a => a.name);
     }
 
+    // 只更新「菜單圖片連結／配送門檻／訂餐方式」，不需要重新上傳 Excel、不會動到菜單品項
+    async function updateMenuInfoOnly() {
+      const targetId = selectedHistoryMenuId || currentActiveMenuId;
+      if (!targetId) {
+        await showCustomAlert('請先在下方搜尋並點選要修改的菜單（或先啟用一個菜單），欄位會自動帶入後再修改！');
+        return;
+      }
+
+      const menuImageUrl = document.getElementById('input-menu-image-url').value.trim();
+      const deliveryThreshold = document.getElementById('input-delivery-threshold').value.trim();
+      const orderInfo = document.getElementById('input-order-info').value.trim();
+
+      const { error } = await sb.from('menus').update({
+        menu_image_url: menuImageUrl,
+        delivery_threshold: deliveryThreshold,
+        order_info: orderInfo
+      }).eq('id', targetId);
+
+      if (error) {
+        await showCustomAlert(`❌ 更新資訊失敗：${error.message}`);
+        return;
+      }
+
+      await showCustomAlert('✅ 資訊已更新！（菜單品項未變動）');
+      await fetchHistoryMenus();
+      await fetchActiveMenu();
+    }
+
     function uploadExcelMenu() {
       const fileInput = document.getElementById('excel-file-input');
       const file = fileInput.files[0];
@@ -1137,28 +1195,60 @@
 
         const menuName = file.name.replace(/\.[^/.]+$/, "");
 
+        // 檢查同一房間內是否已有「相同店家名稱（檔名）」的菜單，若有則直接覆蓋更新該筆，不會產生重複的新舊菜單
+        const { data: existingRows, error: findError } = await sb.from('menus').select('*').eq('room', ROOM).eq('name', menuName);
+        if (findError) {
+          await showCustomAlert(`❌ 檢查現有菜單失敗：${findError.message}`);
+          return;
+        }
+
         await sb.from('menus').update({ is_active: false }).eq('room', ROOM).neq('id', '00000000-0000-0000-0000-000000000000');
-        const { error } = await sb.from('menus').insert({
-          name: menuName,
-          data: menuItems,
-          is_active: true,
-          menu_image_url: menuImageUrl,
-          delivery_threshold: deliveryThreshold,
-          order_info: orderInfo,
-          room: ROOM
-        });
+
+        const existing = (existingRows && existingRows.length > 0) ? existingRows[0] : null;
+
+        // 圖片連結／配送門檻／訂餐方式：若這次沒填，自動沿用舊菜單已儲存的資料，不用重打
+        const finalImageUrl = menuImageUrl || (existing ? (existing.menu_image_url || '') : '');
+        const finalDeliveryThreshold = deliveryThreshold || (existing ? (existing.delivery_threshold || '') : '');
+        const finalOrderInfo = orderInfo || (existing ? (existing.order_info || '') : '');
+
+        let error;
+        if (existing) {
+          // 覆蓋更新舊菜單：品項換成新的，資訊欄位保留（或使用這次新填的）
+          ({ error } = await sb.from('menus').update({
+            data: menuItems,
+            is_active: true,
+            menu_image_url: finalImageUrl,
+            delivery_threshold: finalDeliveryThreshold,
+            order_info: finalOrderInfo
+          }).eq('id', existing.id));
+        } else {
+          ({ error } = await sb.from('menus').insert({
+            name: menuName,
+            data: menuItems,
+            is_active: true,
+            menu_image_url: finalImageUrl,
+            delivery_threshold: finalDeliveryThreshold,
+            order_info: finalOrderInfo,
+            room: ROOM
+          }));
+        }
 
         if (error) {
           await showCustomAlert(`❌ 菜單上傳失敗：${error.message}`);
           return;
         }
 
-        await showCustomAlert(`菜單【${menuName}】上傳成功並設為當前啟用！`);
+        if (existing) {
+          await showCustomAlert(`菜單【${menuName}】已自動覆蓋更新（沿用/更新原本的圖片連結、配送門檻、訂餐方式）並設為當前啟用！`);
+        } else {
+          await showCustomAlert(`菜單【${menuName}】上傳成功並設為當前啟用！`);
+        }
         fileInput.value = '';
         document.getElementById('input-menu-image-url').value = '';
         document.getElementById('input-delivery-threshold').value = '';
         document.getElementById('input-order-info').value = '';
         await fetchActiveMenu();
+        await fetchHistoryMenus();
       };
       reader.readAsArrayBuffer(file);
     }
