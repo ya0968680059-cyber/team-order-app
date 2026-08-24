@@ -27,6 +27,7 @@
       <div>
         <h1 id="app-title" class="text-xl font-bold flex items-center gap-2">
           <span>🍔</span> <span id="app-title-text">團隊團購點餐系統</span>
+          <span id="room-badge" class="text-xs bg-blue-800 px-2 py-0.5 rounded-full font-semibold"></span>
         </h1>
         <p id="broadcast-bar" class="text-xs text-blue-100 mt-0.5">📢 載入廣播資訊中...</p>
       </div>
@@ -439,6 +440,16 @@
     const SUPABASE_KEY = "sb_publishable_Qv7AV8g5EhjVnT795Qm-qA_ZuJK772Y";
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+    // ---------- 多房間（多團）判斷 ----------
+    // 從網址 ?room=1 讀取房號；沒帶參數時預設為 'default'，維持單團模式相容。
+    const urlParams = new URLSearchParams(window.location.search);
+    const ROOM = (urlParams.get('room') || 'default').trim();
+    // settings 資料表沒有 room 欄位，因此用「key 加上房號」的方式讓每個房間擁有獨立設定
+    // 例如：is_active_room_1、cutoff_time_room_1、current_group_id_room_1、admin_password_room_1
+    function roomKey(baseKey) {
+      return `${baseKey}_room_${ROOM}`;
+    }
+
     let currentMenuData = [];      
     let currentActiveMenuId = null;
     let currentMenuImageUrl = "";
@@ -461,6 +472,7 @@
     const DIET_WARNING_KEYWORDS = ['素','全素','蔬食','過敏','禁忌','不吃','不含'];
 
     async function init() {
+      document.getElementById('room-badge').innerText = ROOM !== 'default' ? `房間 ${ROOM}` : '';
       loadDeliveryInfo();
       await ensureCurrentGroup();
       await fetchSettings();
@@ -481,12 +493,12 @@
 
     // ---------- 團購場次 (group) ----------
     async function ensureCurrentGroup() {
-      const { data } = await sb.from('settings').select('*').eq('key', 'current_group_id').maybeSingle();
+      const { data } = await sb.from('settings').select('*').eq('key', roomKey('current_group_id')).maybeSingle();
       if (data && data.value) {
         currentGroupId = typeof data.value === 'string' ? data.value.replace(/"/g, '') : data.value;
       } else {
         currentGroupId = crypto.randomUUID();
-        await sb.from('settings').upsert({ key: 'current_group_id', value: JSON.stringify(currentGroupId) });
+        await sb.from('settings').upsert({ key: roomKey('current_group_id'), value: JSON.stringify(currentGroupId) });
       }
     }
 
@@ -494,15 +506,20 @@
     async function fetchSettings() {
       const { data } = await sb.from('settings').select('*');
       if (data) {
-        const cutoff = data.find(s => s.key === 'cutoff_time');
-        const status = data.find(s => s.key === 'is_active');
+        const cutoff = data.find(s => s.key === roomKey('cutoff_time'));
+        const status = data.find(s => s.key === roomKey('is_active'));
+        const roomTag = ROOM !== 'default' ? `【房間 ${ROOM}】` : '';
         if (cutoff) {
           const val = typeof cutoff.value === 'string' ? cutoff.value.replace(/"/g, '') : cutoff.value;
           document.getElementById('cutoff-time-input').value = val;
-          document.getElementById('broadcast-bar').innerText = val ? `📢 預計 ${val} 結單，請儘速下單！` : '📢 尚未設定結單時間';
+          document.getElementById('broadcast-bar').innerText = val ? `📢 ${roomTag}預計 ${val} 結單，請儘速下單！` : `📢 ${roomTag}尚未設定結單時間`;
+        } else {
+          document.getElementById('broadcast-bar').innerText = `📢 ${roomTag}尚未設定結單時間`;
         }
         if (status) {
           isOrderingOpen = status.value === 'true' || status.value === true;
+        } else {
+          isOrderingOpen = true;
         }
       }
       updateStatusUI();
@@ -529,7 +546,7 @@
 
     // ---------- 菜單 ----------
     async function fetchActiveMenu() {
-      const { data } = await sb.from('menus').select('*').eq('is_active', true).limit(1);
+      const { data } = await sb.from('menus').select('*').eq('is_active', true).eq('room', ROOM).limit(1);
       if (data && data.length > 0) {
         currentActiveMenuId = data[0].id;
         currentMenuData = data[0].data || [];
@@ -556,7 +573,7 @@
     }
 
     async function fetchOrders() {
-      const { data } = await sb.from('orders').select('*').eq('group_id', currentGroupId).order('created_at', { ascending: false });
+      const { data } = await sb.from('orders').select('*').eq('group_id', currentGroupId).eq('room', ROOM).order('created_at', { ascending: false });
       allOrders = data || [];
       renderOrdersSection();
       renderSummarySection();
@@ -884,7 +901,7 @@
           const res = await sb.from('orders').update({ items: finalCart, total_price: total }).eq('id', existingOrder.id);
           error = res.error;
         } else {
-          const res = await sb.from('orders').insert([{ user_name: name, items: finalCart, total_price: total, is_paid: false, group_id: currentGroupId, sub_group: 0 }]);
+          const res = await sb.from('orders').insert([{ user_name: name, items: finalCart, total_price: total, is_paid: false, group_id: currentGroupId, sub_group: 0, room: ROOM }]);
           error = res.error;
         }
 
@@ -914,7 +931,7 @@
       if (!pwd) return;
 
       try {
-        const { data } = await sb.from('settings').select('value').eq('key', 'admin_password').maybeSingle();
+        const { data } = await sb.from('settings').select('value').eq('key', roomKey('admin_password')).maybeSingle();
         let dbPassword = "1234";
         if (data && data.value) {
           dbPassword = typeof data.value === 'string' ? data.value.replace(/"/g, '') : data.value;
@@ -956,14 +973,15 @@
 
     async function toggleOrderStatus(status) {
       isOrderingOpen = status;
-      await sb.from('settings').upsert({ key: 'is_active', value: JSON.stringify(status) });
+      await sb.from('settings').upsert({ key: roomKey('is_active'), value: JSON.stringify(status) });
       updateStatusUI();
     }
 
     async function saveCutoffTime() {
       const val = document.getElementById('cutoff-time-input').value.trim();
-      await sb.from('settings').upsert({ key: 'cutoff_time', value: JSON.stringify(val) });
-      document.getElementById('broadcast-bar').innerText = `📢 預計 ${val} 結單，請儘速下單！`;
+      await sb.from('settings').upsert({ key: roomKey('cutoff_time'), value: JSON.stringify(val) });
+      const roomTag = ROOM !== 'default' ? `【房間 ${ROOM}】` : '';
+      document.getElementById('broadcast-bar').innerText = `📢 ${roomTag}預計 ${val} 結單，請儘速下單！`;
       await showCustomAlert('預計結單時間已廣播！');
     }
 
@@ -972,11 +990,11 @@
       if (!confirmNew) return;
 
       const newGroupId = crypto.randomUUID();
-      await sb.from('settings').upsert({ key: 'current_group_id', value: JSON.stringify(newGroupId) });
+      await sb.from('settings').upsert({ key: roomKey('current_group_id'), value: JSON.stringify(newGroupId) });
       currentGroupId = newGroupId;
 
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      await sb.from('orders').delete().lt('created_at', thirtyDaysAgo);
+      await sb.from('orders').delete().lt('created_at', thirtyDaysAgo).eq('room', ROOM);
 
       await fetchOrders();
       await showCustomAlert('已開啟新一團！歷史訂單已歸檔，超過 30 天的舊訂單已自動清理。');
@@ -995,7 +1013,7 @@
       if (new1 !== new2) { await showCustomAlert('兩次新密碼輸入不一致！'); return; }
 
       try {
-        const { data, error } = await sb.from('settings').select('value').eq('key', 'admin_password').maybeSingle();
+        const { data, error } = await sb.from('settings').select('value').eq('key', roomKey('admin_password')).maybeSingle();
         let currentDbPassword = "1234";
         if (data && data.value) {
           currentDbPassword = typeof data.value === 'string' ? data.value.replace(/"/g, '') : data.value;
@@ -1006,7 +1024,7 @@
           return;
         }
 
-        const { error: updateError } = await sb.from('settings').upsert({ key: 'admin_password', value: JSON.stringify(new1) });
+        const { error: updateError } = await sb.from('settings').upsert({ key: roomKey('admin_password'), value: JSON.stringify(new1) });
         if (updateError) {
           await showCustomAlert(`密碼修改失敗：${updateError.message}`);
           return;
@@ -1076,14 +1094,15 @@
 
         const menuName = file.name.replace(/\.[^/.]+$/, "");
 
-        await sb.from('menus').update({ is_active: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+        await sb.from('menus').update({ is_active: false }).eq('room', ROOM).neq('id', '00000000-0000-0000-0000-000000000000');
         const { error } = await sb.from('menus').insert({
           name: menuName,
           data: menuItems,
           is_active: true,
           menu_image_url: menuImageUrl,
           delivery_threshold: deliveryThreshold,
-          order_info: orderInfo
+          order_info: orderInfo,
+          room: ROOM
         });
 
         if (error) {
@@ -1103,7 +1122,7 @@
 
     // ---------- 歷史菜單 ----------
     async function fetchHistoryMenus() {
-      const { data } = await sb.from('menus').select('*');
+      const { data } = await sb.from('menus').select('*').eq('room', ROOM);
       historyMenus = data || [];
       historyMenus.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant', { numeric: true }));
       selectedHistoryMenuId = null;
@@ -1145,7 +1164,7 @@
         await showCustomAlert('請先從清單中搜尋並點選要啟用的菜單！');
         return;
       }
-      await sb.from('menus').update({ is_active: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      await sb.from('menus').update({ is_active: false }).eq('room', ROOM).neq('id', '00000000-0000-0000-0000-000000000000');
       await sb.from('menus').update({ is_active: true }).eq('id', selectedHistoryMenuId);
       await fetchActiveMenu();
       await showCustomAlert('已切換當前啟用菜單！');
