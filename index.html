@@ -149,7 +149,7 @@
             </div>
           </div>
           <p class="text-[11px] text-slate-400 leading-relaxed">
-            支援欄位：<b>品項</b>／<b>價格</b>／規格 (選填，格式 <code>大份:20/小份:0</code>)／加點 (選填，格式 <code>加蛋:15/加肉:30</code>)／類別 (選填，填「飲料」、「湯品」或「餐點」)
+            支援欄位：<b>品項</b>／<b>價格</b>／規格 (選填，格式 <code>中杯/大杯:15;正常甜/半糖:0</code>，使用分號 <code>;</code> 區隔不同規格)／加點 (選填，格式 <code>琥珀珍珠:15/功夫茶凍:15</code>)／類別 (選填)
           </p>
 
           <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center pt-1">
@@ -933,8 +933,6 @@
     }
 
     // ---------- 管理者登入 / 密碼與面板控制 ----------
-    // 同一瀏覽器分頁（session）內，只要驗證成功過一次，之後在「切換前台／團主管理」之間切換就不用再重複輸入密碼。
-    // 關閉分頁或重新整理後，sessionStorage 會清空，需要重新輸入密碼（避免密碼被永久記住造成安全疑慮）。
     const ADMIN_AUTH_KEY = roomKey('admin_authed');
     function isAdminAuthed() {
       return sessionStorage.getItem(ADMIN_AUTH_KEY) === 'true';
@@ -944,7 +942,6 @@
     }
 
     async function toggleAdminAuth() {
-      // 已在本次瀏覽階段驗證過密碼，直接進入後台，不再詢問。
       if (isAdminAuthed()) {
         switchToAdminView();
         return;
@@ -1065,13 +1062,22 @@
       }
     }
 
-    // ---------- Excel 菜單上傳 (含新欄位) ----------
+    // ---------- Excel 菜單上傳 (含規格使用分號 ";" 區隔之修改) ----------
     function parseSpecColumn(raw) {
       if (!raw) return [];
-      return String(raw).split(/[\/\／]/).map(part => {
-        const [name, extra] = part.split(/[\:\：]/);
-        return { name: (name || '').trim(), extra: parseInt(extra) || 0 };
-      }).filter(s => s.name);
+      // 以分號 ";" 來區別不同規格群組
+      return String(raw).split(';').map(group => {
+        const trimmedGroup = group.trim();
+        if (!trimmedGroup) return null;
+        
+        // 針對每個規格群組內部（例如 中杯/大杯:15），再以斜線切割選項
+        const options = trimmedGroup.split(/[\/\／]/).map(part => {
+          const [name, extra] = part.split(/[\:\：]/);
+          return { name: (name || '').trim(), extra: parseInt(extra) || 0 };
+        }).filter(s => s.name);
+
+        return options;
+      }).filter(g => g && g.length > 0);
     }
 
     function parseAddOnColumn(raw) {
@@ -1104,7 +1110,9 @@
         const menuItems = json.map(row => {
           const name = row['品項'] || row['餐點'] || row['品名'] || '未命名';
           const price = parseInt(row['價格'] || row['單價'] || 0);
-          const sizes = parseSpecColumn(row['規格']);
+          const rawSizes = parseSpecColumn(row['規格']);
+          // 支援多種規格欄位結構：若 parseSpecColumn 回傳雙重陣列，取第一組或扁平化處理
+          const sizes = rawSizes.length > 0 && Array.isArray(rawSizes[0]) ? rawSizes.flat() : rawSizes;
           const addOns = parseAddOnColumn(row['加點'] || row['加點項目']);
           const rawCategory = (row['類別'] || row['分類'] || '').toString();
           const category = rawCategory.includes('飲') || rawCategory.includes('湯') ? 'drink' : (rawCategory.includes('餐') ? 'meal' : guessCategory(String(name)));
