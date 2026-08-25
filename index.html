@@ -232,9 +232,9 @@
                 <option value="5">第5單</option>
               </select>
             </div>
-            <!-- 新增：重新排序按鈕 -->
-            <button onclick="sortOrdersBySubGroup()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg transition text-xs flex items-center gap-1">
-              🔄 重新排序
+            <!-- 更新訂單並重新排序按鈕：會先向資料庫重新抓取最新訂單，再依分單排序，區塊二/區塊三同步更新 -->
+            <button id="btn-refresh-sort" onclick="sortOrdersBySubGroup()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg transition text-xs flex items-center gap-1">
+              🔄 更新訂單並排序
             </button>
             <div class="flex gap-2 text-sm bg-slate-100 p-1 rounded-lg">
               <button onclick="switchViewMode('person')" id="btn-view-person" class="bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition text-xs">👤 按個人對帳</button>
@@ -595,17 +595,37 @@
       renderPrintTable();
     }
 
-    // 重新排序功能：依分單排序（第1單、第2單...不分單放後面）
+    // 更新並重新排序功能：先向資料庫抓取最新訂單資料，再依分單排序（第1單、第2單...不分單放後面）
     async function sortOrdersBySubGroup() {
-      allOrders.sort((a, b) => {
-        let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : 999;
-        let sgB = (b.sub_group !== null && b.sub_group !== undefined && b.sub_group > 0) ? b.sub_group : 999;
-        if (sgA !== sgB) return sgA - sgB;
-        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
-      });
-      renderOrdersSection();
-      renderPrintTable();
-      await showCustomAlert('🔄 已完成重新排序：相同分單的訂單已集中排列！');
+      const btn = document.getElementById('btn-refresh-sort');
+      if (btn) { btn.disabled = true; btn.innerText = '⏳ 更新中...'; }
+
+      try {
+        // 1. 先向資料庫重新抓取最新訂單（同步前台剛送出的新訂單/修改）
+        const { data, error } = await sb.from('orders').select('*').eq('group_id', currentGroupId).eq('room', ROOM).order('created_at', { ascending: false });
+        if (error) {
+          await showCustomAlert(`❌ 更新訂單失敗：${error.message}`);
+          return;
+        }
+        allOrders = data || [];
+
+        // 2. 依分單排序（第1單、第2單...不分單放後面）
+        allOrders.sort((a, b) => {
+          let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : 999;
+          let sgB = (b.sub_group !== null && b.sub_group !== undefined && b.sub_group > 0) ? b.sub_group : 999;
+          if (sgA !== sgB) return sgA - sgB;
+          return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+        });
+
+        // 3. 重新渲染所有相關區塊，包含區塊二（明細整理區）與區塊三
+        renderOrdersSection();
+        renderSummarySection();
+        renderPrintTable();
+
+        await showCustomAlert('🔄 已完成更新並重新排序：訂單資料已同步最新狀態！');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = '🔄 更新訂單並排序'; }
+      }
     }
 
     // 燈箱控制
