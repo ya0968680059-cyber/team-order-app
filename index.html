@@ -1406,6 +1406,27 @@
       return map;
     }
 
+    // 依「菜單原始上傳順序」取得品項的排序索引；找不到的品項排到最後
+    function getMenuOrderIndex(name) {
+      const idx = currentMenuData.findIndex(m => m.name === name);
+      return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+    }
+
+    // 將明細/發放清單的 key（格式為「品項名稱」或「品項名稱 (備註)」）依菜單順序排序
+    // 同一品項（不同備註）之間，再依備註文字排序，避免順序不穩定
+    function sortKeysByMenuOrder(keys) {
+      return keys.sort((a, b) => {
+        const parenIdxA = a.indexOf(' (');
+        const parenIdxB = b.indexOf(' (');
+        const nameA = parenIdxA === -1 ? a : a.substring(0, parenIdxA);
+        const nameB = parenIdxB === -1 ? b : b.substring(0, parenIdxB);
+        const orderA = getMenuOrderIndex(nameA);
+        const orderB = getMenuOrderIndex(nameB);
+        if (orderA !== orderB) return orderA - orderB;
+        return a.localeCompare(b, 'zh-Hant');
+      });
+    }
+
     function switchReportViewMode(mode) {
       reportViewMode = mode;
       document.getElementById('btn-report-total').className = mode === 'total' ? 'bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition text-xs' : 'text-slate-600 font-semibold px-3 py-1 rounded-md transition text-xs';
@@ -1451,7 +1472,7 @@
 
       if (reportViewMode === 'total') {
         const { summary } = computeSummary();
-        const sortedKeys = Object.keys(summary).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+        const sortedKeys = sortKeysByMenuOrder(Object.keys(summary));
         let html = sortedKeys.map(k => `<div class="text-slate-700">• <strong>${k}</strong> x ${summary[k]}</div>`).join('') || '<p class="text-slate-400">尚無統計資料</p>';
 
         if (specialNotes.length > 0) {
@@ -1499,7 +1520,7 @@
             });
           });
 
-          const sortedKeys = Object.keys(groupSummary).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+          const sortedKeys = sortKeysByMenuOrder(Object.keys(groupSummary));
 
           html += `
             <div class="mb-4 last:mb-0 border-b border-slate-200 pb-3 last:border-b-0 last:pb-0">
@@ -1543,7 +1564,7 @@
 
       if (sortedSGs.length === 1 && sortedSGs[0] === '不分單') {
         const { summary, specialNotes, totalAmount, mealCount, drinkCount } = computeSummary();
-        const sortedKeys = Object.keys(summary).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+        const sortedKeys = sortKeysByMenuOrder(Object.keys(summary));
         sortedKeys.forEach(k => text += `${k} x ${summary[k]}\n`);
 
         if (specialNotes.length > 0) {
@@ -1572,7 +1593,7 @@
           });
 
           text += `📌 【${sgName}】\n`;
-          const sortedKeys = Object.keys(groupSummary).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+          const sortedKeys = sortKeysByMenuOrder(Object.keys(groupSummary));
           sortedKeys.forEach(k => text += `• ${k} x ${groupSummary[k]}\n`);
           text += `小計：餐點 ${groupMeal} 份 ｜ 金額 $${groupTotal} 元\n`;
           text += `------------------------\n`;
@@ -1678,7 +1699,7 @@
           });
         });
 
-        const sortedKeys = Object.keys(itemGroups).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+        const sortedKeys = sortKeysByMenuOrder(Object.keys(itemGroups));
 
         container.innerHTML = sortedKeys.map(k => `
           <div class="p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm">
@@ -1915,7 +1936,7 @@
             itemGroups[key].push(`${o.user_name}${sgText} x${i.qty}`);
           });
         });
-        const sortedKeys = Object.keys(itemGroups).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+        const sortedKeys = sortKeysByMenuOrder(Object.keys(itemGroups));
         tbody.innerHTML = sortedKeys.map(k => `
           <tr>
             <td class="border border-black p-2 text-center">☐</td>
