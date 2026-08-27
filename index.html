@@ -128,9 +128,6 @@
           <p class="font-bold text-sm text-slate-800">📁 菜單管理 (目前前台啟用中：<span id="active-menu-name" class="text-blue-600 font-extrabold">無</span>)</p>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <div class="md:col-span-3 flex flex-col md:flex-row gap-3 items-start md:items-center">
-              <input type="file" id="excel-file-input" accept=".xlsx, .xls" class="text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-            </div>
             <div>
               <label class="block text-xs font-semibold text-slate-600 mb-1">菜單圖片連結</label>
               <input type="text" id="input-menu-image-url" placeholder="https://example.com/menu.jpg" class="w-full border border-slate-300 p-2 rounded-lg text-xs outline-none bg-white">
@@ -143,18 +140,15 @@
               <label class="block text-xs font-semibold text-slate-600 mb-1">訂餐方式</label>
               <input type="text" id="input-order-info" placeholder="例如：電話或Line點餐" class="w-full border border-slate-300 p-2 rounded-lg text-xs outline-none bg-white">
             </div>
-            <div class="md:col-span-3 flex flex-wrap justify-end gap-2">
+            <div class="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <label for="excel-file-input" class="cursor-pointer bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-sm font-bold px-5 py-2 rounded-lg shadow-sm transition text-center truncate">
+                📁 <span id="excel-file-label">選擇檔案</span>
+              </label>
+              <input type="file" id="excel-file-input" accept=".xlsx, .xls" class="hidden" onchange="document.getElementById('excel-file-label').innerText = this.files[0] ? this.files[0].name : '選擇檔案';">
               <button onclick="updateMenuInfoOnly()" class="bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold px-5 py-2 rounded-lg shadow-sm transition">💾 只更新資訊（免上傳檔案）</button>
               <button onclick="uploadExcelMenu()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2 rounded-lg shadow-sm transition">📤 上傳新 Excel 菜單並儲存資訊</button>
             </div>
           </div>
-          <p class="text-[11px] text-slate-400 leading-relaxed">
-            支援欄位：<b>品項</b>／<b>價格</b>／規格 (選填，格式 <code>中杯/大杯:15;正常甜/半糖:0</code>，使用分號 <code>;</code> 區隔不同規格)／加點 (選填，格式 <code>琥珀珍珠:15/功夫茶凍:15</code>)／類別 (選填)
-          </p>
-          <p class="text-[11px] text-blue-500 leading-relaxed">
-            💡 只想改「菜單圖片連結／配送門檻／訂餐方式」不想重傳菜單品項？請先在下方搜尋並點選要修改的菜單（欄位會自動帶入），改好後直接按「💾 只更新資訊」即可，不需要選擇檔案。<br>
-            💡 上傳 Excel 時，若「檔案名稱」與現有菜單店家名稱相同，系統會自動覆蓋更新該菜單（品項會換成新的），且圖片連結／配送門檻／訂餐方式欄位若留空，會自動沿用原本已儲存的資料，不需要重新輸入。
-          </p>
 
           <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center pt-1">
             <div class="relative flex-1">
@@ -587,15 +581,22 @@
       await fetchHistoryMenus();
     }
 
+    // 依姓名自然排序（1~9、A-Z、中文皆適用），用於訂單的預設排序
+    function sortOrdersByName(arr) {
+      arr.sort((a, b) => String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-Hant', { numeric: true, sensitivity: 'base' }));
+      return arr;
+    }
+
     async function fetchOrders() {
       const { data } = await sb.from('orders').select('*').eq('group_id', currentGroupId).eq('room', ROOM).order('created_at', { ascending: false });
       allOrders = data || [];
+      sortOrdersByName(allOrders);
       renderOrdersSection();
       renderSummarySection();
       renderPrintTable();
     }
 
-    // 更新並重新排序功能：先向資料庫抓取最新訂單資料，再依分單排序（第1單、第2單...不分單放後面）
+    // 更新並重新排序功能：先向資料庫抓取最新訂單資料，再依分單排序（第1單、第2單...不分單放後面），各分單內則依姓名自然排序（1~9、A-Z）
     async function sortOrdersBySubGroup() {
       const btn = document.getElementById('btn-refresh-sort');
       if (btn) { btn.disabled = true; btn.innerText = '⏳ 更新中...'; }
@@ -609,12 +610,12 @@
         }
         allOrders = data || [];
 
-        // 2. 依分單排序（第1單、第2單...不分單放後面）
+        // 2. 依分單排序（第1單、第2單...不分單放後面），各分單內再依姓名自然排序（1~9、A-Z）
         allOrders.sort((a, b) => {
           let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : 999;
           let sgB = (b.sub_group !== null && b.sub_group !== undefined && b.sub_group > 0) ? b.sub_group : 999;
           if (sgA !== sgB) return sgA - sgB;
-          return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+          return String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-Hant', { numeric: true, sensitivity: 'base' });
         });
 
         // 3. 重新渲染所有相關區塊，包含區塊二（明細整理區）與區塊三
@@ -1264,6 +1265,7 @@
           await showCustomAlert(`菜單【${menuName}】上傳成功並設為當前啟用！`);
         }
         fileInput.value = '';
+        document.getElementById('excel-file-label').innerText = '選擇檔案';
         document.getElementById('input-menu-image-url').value = '';
         document.getElementById('input-delivery-threshold').value = '';
         document.getElementById('input-order-info').value = '';
