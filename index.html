@@ -141,7 +141,6 @@
               <input type="text" id="input-order-info" placeholder="例如：電話或Line點餐" class="w-full border border-slate-300 p-2 rounded-lg text-xs outline-none bg-white">
             </div>
             <div class="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <!-- 已修改為與「🧹 開新訂單」一致的澄底白字風格 -->
               <label for="excel-file-input" class="cursor-pointer bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold px-5 py-2.5 rounded-lg shadow-sm transition text-center truncate flex items-center justify-center gap-1.5">
                 📁 <span id="excel-file-label">選擇檔案</span>
               </label>
@@ -574,15 +573,21 @@
       await fetchHistoryMenus();
     }
 
-    function sortOrdersByName(arr) {
-      arr.sort((a, b) => String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-Hant', { numeric: true, sensitivity: 'base' }));
+    // 修改處：先依單號排序 (不分單、第1單、第2單...)，再依訂購人姓名排序
+    function sortOrders(arr) {
+      arr.sort((a, b) => {
+        let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : 999;
+        let sgB = (b.sub_group !== null && b.sub_group !== undefined && b.sub_group > 0) ? b.sub_group : 999;
+        if (sgA !== sgB) return sgA - sgB;
+        return String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-Hant', { numeric: true, sensitivity: 'base' });
+      });
       return arr;
     }
 
     async function fetchOrders() {
       const { data } = await sb.from('orders').select('*').eq('group_id', currentGroupId).eq('room', ROOM).order('created_at', { ascending: false });
       allOrders = data || [];
-      sortOrdersByName(allOrders);
+      sortOrders(allOrders);
       renderOrdersSection();
       renderSummarySection();
       renderPrintTable();
@@ -599,19 +604,13 @@
           return;
         }
         allOrders = data || [];
-
-        allOrders.sort((a, b) => {
-          let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : 999;
-          let sgB = (b.sub_group !== null && b.sub_group !== undefined && b.sub_group > 0) ? b.sub_group : 999;
-          if (sgA !== sgB) return sgA - sgB;
-          return String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-Hant', { numeric: true, sensitivity: 'base' });
-        });
+        sortOrders(allOrders);
 
         renderOrdersSection();
         renderSummarySection();
         renderPrintTable();
 
-        await showCustomAlert('🔄 已完成更新並重新排序：訂單資料已同步最新狀態！');
+        await showCustomAlert('🔄 已完成更新並依單號與姓名重新排序！');
       } finally {
         if (btn) { btn.disabled = false; btn.innerText = '🔄 更新訂單並排序'; }
       }
