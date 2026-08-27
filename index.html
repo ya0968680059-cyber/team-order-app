@@ -141,7 +141,8 @@
               <input type="text" id="input-order-info" placeholder="例如：電話或Line點餐" class="w-full border border-slate-300 p-2 rounded-lg text-xs outline-none bg-white">
             </div>
             <div class="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <label for="excel-file-input" class="cursor-pointer bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-sm font-bold px-5 py-2 rounded-lg shadow-sm transition text-center truncate">
+              <!-- 已加上醒目底色、邊框與懸停效果 -->
+              <label for="excel-file-input" class="cursor-pointer bg-blue-50 hover:bg-blue-100 border-2 border-dashed border-blue-400 text-blue-700 text-sm font-bold px-5 py-2.5 rounded-lg shadow-sm transition text-center truncate flex items-center justify-center gap-1.5">
                 📁 <span id="excel-file-label">選擇檔案</span>
               </label>
               <input type="file" id="excel-file-input" accept=".xlsx, .xls" class="hidden" onchange="document.getElementById('excel-file-label').innerText = this.files[0] ? this.files[0].name : '選擇檔案';">
