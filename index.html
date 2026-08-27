@@ -141,8 +141,8 @@
               <input type="text" id="input-order-info" placeholder="例如：電話或Line點餐" class="w-full border border-slate-300 p-2 rounded-lg text-xs outline-none bg-white">
             </div>
             <div class="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <!-- 已加上醒目底色、邊框與懸停效果 -->
-              <label for="excel-file-input" class="cursor-pointer bg-blue-50 hover:bg-blue-100 border-2 border-dashed border-blue-400 text-blue-700 text-sm font-bold px-5 py-2.5 rounded-lg shadow-sm transition text-center truncate flex items-center justify-center gap-1.5">
+              <!-- 已修改為與「🧹 開新訂單」一致的澄底白字風格 -->
+              <label for="excel-file-input" class="cursor-pointer bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold px-5 py-2.5 rounded-lg shadow-sm transition text-center truncate flex items-center justify-center gap-1.5">
                 📁 <span id="excel-file-label">選擇檔案</span>
               </label>
               <input type="file" id="excel-file-input" accept=".xlsx, .xls" class="hidden" onchange="document.getElementById('excel-file-label').innerText = this.files[0] ? this.files[0].name : '選擇檔案';">
@@ -227,7 +227,7 @@
                 <option value="5">第5單</option>
               </select>
             </div>
-            <!-- 更新訂單並重新排序按鈕：會先向資料庫重新抓取最新訂單，再依分單排序，區塊二/區塊三同步更新 -->
+            <!-- 更新訂單並重新排序按鈕 -->
             <button id="btn-refresh-sort" onclick="sortOrdersBySubGroup()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg transition text-xs flex items-center gap-1">
               🔄 更新訂單並排序
             </button>
@@ -286,7 +286,7 @@
 
   <!-- ================= 彈窗模組 (Modals) ================= -->
 
-  <!-- 全站自訂彈窗 (取代 alert / confirm / prompt) -->
+  <!-- 全站自訂彈窗 -->
   <div id="custom-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-200">
       <div class="flex items-center gap-2 border-b pb-3">
@@ -365,7 +365,6 @@
   </div>
 
   <script>
-    // ---------- 自訂彈窗替代原生 alert/confirm/prompt ----------
     function showCustomAlert(message) {
       return new Promise((resolve) => {
         const modal = document.getElementById('custom-modal');
@@ -443,12 +442,8 @@
     const SUPABASE_KEY = "sb_publishable_Qv7AV8g5EhjVnT795Qm-qA_ZuJK772Y";
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    // ---------- 多房間（多團）判斷 ----------
-    // 從網址 ?room=1 讀取房號；沒帶參數時預設為 'default'，維持單團模式相容。
     const urlParams = new URLSearchParams(window.location.search);
     const ROOM = (urlParams.get('room') || 'default').trim();
-    // settings 資料表沒有 room 欄位，因此用「key 加上房號」的方式讓每個房間擁有獨立設定
-    // 例如：is_active_room_1、cutoff_time_room_1、current_group_id_room_1、admin_password_room_1
     function roomKey(baseKey) {
       return `${baseKey}_room_${ROOM}`;
     }
@@ -466,7 +461,7 @@
     let userCart = [];
     let debounceTimer = null;
     let viewMode = 'person';
-    let reportViewMode = 'total'; // 'total' 或 'subgroup'
+    let reportViewMode = 'total';
     let editingOrderId = null;
     let editingItems = [];
     let selectedMenuIndex = null;
@@ -501,7 +496,6 @@
       });
     }
 
-    // ---------- 團購場次 (group) ----------
     async function ensureCurrentGroup() {
       const { data } = await sb.from('settings').select('*').eq('key', roomKey('current_group_id')).maybeSingle();
       if (data && data.value) {
@@ -512,7 +506,6 @@
       }
     }
 
-    // ---------- 狀態 / 廣播 ----------
     async function fetchSettings() {
       const { data } = await sb.from('settings').select('*');
       if (data) {
@@ -554,7 +547,6 @@
       renderCart();
     }
 
-    // ---------- 菜單 ----------
     async function fetchActiveMenu() {
       const { data } = await sb.from('menus').select('*').eq('is_active', true).eq('room', ROOM).limit(1);
       if (data && data.length > 0) {
@@ -582,7 +574,6 @@
       await fetchHistoryMenus();
     }
 
-    // 依姓名自然排序（1~9、A-Z、中文皆適用），用於訂單的預設排序
     function sortOrdersByName(arr) {
       arr.sort((a, b) => String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-Hant', { numeric: true, sensitivity: 'base' }));
       return arr;
@@ -597,13 +588,11 @@
       renderPrintTable();
     }
 
-    // 更新並重新排序功能：先向資料庫抓取最新訂單資料，再依分單排序（第1單、第2單...不分單放後面），各分單內則依姓名自然排序（1~9、A-Z）
     async function sortOrdersBySubGroup() {
       const btn = document.getElementById('btn-refresh-sort');
       if (btn) { btn.disabled = true; btn.innerText = '⏳ 更新中...'; }
 
       try {
-        // 1. 先向資料庫重新抓取最新訂單（同步前台剛送出的新訂單/修改）
         const { data, error } = await sb.from('orders').select('*').eq('group_id', currentGroupId).eq('room', ROOM).order('created_at', { ascending: false });
         if (error) {
           await showCustomAlert(`❌ 更新訂單失敗：${error.message}`);
@@ -611,7 +600,6 @@
         }
         allOrders = data || [];
 
-        // 2. 依分單排序（第1單、第2單...不分單放後面），各分單內再依姓名自然排序（1~9、A-Z）
         allOrders.sort((a, b) => {
           let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : 999;
           let sgB = (b.sub_group !== null && b.sub_group !== undefined && b.sub_group > 0) ? b.sub_group : 999;
@@ -619,7 +607,6 @@
           return String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-Hant', { numeric: true, sensitivity: 'base' });
         });
 
-        // 3. 重新渲染所有相關區塊，包含區塊二（明細整理區）與區塊三
         renderOrdersSection();
         renderSummarySection();
         renderPrintTable();
@@ -630,13 +617,11 @@
       }
     }
 
-    // 燈箱控制
     function openMenuLightbox() {
       const modal = document.getElementById('menu-lightbox-modal');
       const area = document.getElementById('lightbox-content-area');
       const originalLink = document.getElementById('lightbox-open-original');
       if (currentMenuImageUrl) {
-        // 預設以「寬度撐滿彈窗」顯示（比舊版大很多）；點擊圖片可切換成原始解析度並可捲動查看細節
         area.innerHTML = `<img id="lightbox-img" src="${currentMenuImageUrl}" alt="完整的菜單大圖" onclick="toggleLightboxZoom()" class="w-full max-w-none h-auto rounded-lg shadow cursor-zoom-in mx-auto block">`;
         originalLink.href = currentMenuImageUrl;
         originalLink.classList.remove('hidden');
@@ -647,7 +632,6 @@
       modal.classList.remove('hidden');
     }
 
-    // 點擊菜單圖片可在「撐滿寬度」與「100% 原始解析度（可捲動）」之間切換，避免圖片被強制縮小
     function toggleLightboxZoom() {
       const img = document.getElementById('lightbox-img');
       if (!img) return;
@@ -712,8 +696,6 @@
       document.getElementById('menu-dropdown-list').classList.add('hidden');
 
       const panel = document.getElementById('selected-item-panel');
-      // sizeGroups：規格「群組」陣列，每個群組是一組互斥（單選）的選項。
-      // 群組數量與內容皆來自 Excel「規格」欄位以分號 ";" 切割的結果。
       const sizeGroups = item.sizes && item.sizes.length ? item.sizes : [];
       const multiGroupSizes = sizeGroups.filter(g => g && g.length > 1);
       const addOns = item.addOns || [];
@@ -725,7 +707,6 @@
         </div>
 
         ${sizeGroups.map((group, gIdx) => {
-          // 群組內只有 1 個選項時，直接套用該選項，不需要顯示可選按鈕
           if (!group || group.length <= 1) return '';
           return `
             <div class="text-xs space-y-1">
@@ -794,8 +775,6 @@
       let singleUnitPrice = item.price;
       let specNotes = [];
 
-      // sizeGroups：每個群組各自獨立單選（例如 杯型 / 甜度 / 冰塊），
-      // 逐一取出每個群組目前選中的選項，價格加總、備註合併。
       const sizeGroups = item.sizes || [];
       sizeGroups.forEach((group, gIdx) => {
         if (!group || !group.length) return;
@@ -867,7 +846,6 @@
       return sorted;
     }
 
-    // ---------- 購物車 ----------
     async function addToCart(menuIdx) {
       if (!isOrderingOpen) {
         await showCustomAlert('已結單，停止接收新訂單！');
@@ -994,7 +972,6 @@
       }
     }
 
-    // ---------- 管理者登入 / 密碼與面板控制 ----------
     const ADMIN_AUTH_KEY = roomKey('admin_authed');
     function isAdminAuthed() {
       return sessionStorage.getItem(ADMIN_AUTH_KEY) === 'true';
@@ -1124,15 +1101,12 @@
       }
     }
 
-    // ---------- Excel 菜單上傳 (含規格使用分號 ";" 區隔之修改) ----------
     function parseSpecColumn(raw) {
       if (!raw) return [];
-      // 以分號 ";" 來區別不同規格群組
       return String(raw).split(';').map(group => {
         const trimmedGroup = group.trim();
         if (!trimmedGroup) return null;
         
-        // 針對每個規格群組內部（例如 中杯/大杯:15），再以斜線切割選項
         const options = trimmedGroup.split(/[\/\／]/).map(part => {
           const [name, extra] = part.split(/[\:\：]/);
           return { name: (name || '').trim(), extra: parseInt(extra) || 0 };
@@ -1150,7 +1124,6 @@
       }).filter(a => a.name);
     }
 
-    // 只更新「菜單圖片連結／配送門檻／訂餐方式」，不需要重新上傳 Excel、不會動到菜單品項
     async function updateMenuInfoOnly() {
       const targetId = selectedHistoryMenuId || currentActiveMenuId;
       if (!targetId) {
@@ -1200,9 +1173,6 @@
         const menuItems = json.map(row => {
           const name = row['品項'] || row['餐點'] || row['品名'] || '未命名';
           const price = parseInt(row['價格'] || row['單價'] || 0);
-          // 規格欄位：以分號 ";" 區分不同「規格群組」（例如 杯型 / 甜度 / 冰塊），
-          // 每個群組內再以斜線 "/" 區分該群組底下的可選項目。
-          // sizes 結構為「群組陣列」：[[{name,extra},...群組1選項], [{name,extra},...群組2選項], ...]
           const sizes = parseSpecColumn(row['規格']);
           const addOns = parseAddOnColumn(row['加點'] || row['加點項目']);
           const rawCategory = (row['類別'] || row['分類'] || '').toString();
@@ -1217,7 +1187,6 @@
 
         const menuName = file.name.replace(/\.[^/.]+$/, "");
 
-        // 檢查同一房間內是否已有「相同店家名稱（檔名）」的菜單，若有則直接覆蓋更新該筆，不會產生重複的新舊菜單
         const { data: existingRows, error: findError } = await sb.from('menus').select('*').eq('room', ROOM).eq('name', menuName);
         if (findError) {
           await showCustomAlert(`❌ 檢查現有菜單失敗：${findError.message}`);
@@ -1228,14 +1197,12 @@
 
         const existing = (existingRows && existingRows.length > 0) ? existingRows[0] : null;
 
-        // 圖片連結／配送門檻／訂餐方式：若這次沒填，自動沿用舊菜單已儲存的資料，不用重打
         const finalImageUrl = menuImageUrl || (existing ? (existing.menu_image_url || '') : '');
         const finalDeliveryThreshold = deliveryThreshold || (existing ? (existing.delivery_threshold || '') : '');
         const finalOrderInfo = orderInfo || (existing ? (existing.order_info || '') : '');
 
         let error;
         if (existing) {
-          // 覆蓋更新舊菜單：品項換成新的，資訊欄位保留（或使用這次新填的）
           ({ error } = await sb.from('menus').update({
             data: menuItems,
             is_active: true,
@@ -1276,7 +1243,6 @@
       reader.readAsArrayBuffer(file);
     }
 
-    // ---------- 歷史菜單 ----------
     async function fetchHistoryMenus() {
       const { data } = await sb.from('menus').select('*').eq('room', ROOM);
       historyMenus = data || [];
@@ -1358,7 +1324,6 @@
       }
 
       const rows = menuList.map(item => {
-        // 匯出時還原格式：群組內用 "/" 串接選項，群組之間用 ";" 串接
         const specStr = item.sizes ? item.sizes.map(group => (group || []).map(s => `${s.name}:${s.extra}`).join('/')).join(';') : '';
         const addOnStr = item.addOns ? item.addOns.map(a => `${a.name}:${a.price}`).join('/') : '';
         const categoryStr = item.category === 'drink' ? '飲料' : '餐點';
@@ -1378,7 +1343,6 @@
       XLSX.writeFile(workbook, `${data.name}.xlsx`);
     }
 
-    // ---------- 外送資訊 ----------
     function getTodayFormattedTime() {
       const now = new Date();
       const month = now.getMonth() + 1;
@@ -1402,21 +1366,17 @@
       localStorage.setItem('info_time', document.getElementById('info-time').value);
     }
 
-    // ---------- 統計 / 明細整理 ----------
     function getCategoryMap() {
       const map = {};
       currentMenuData.forEach(i => { map[i.name] = i.category || guessCategory(i.name); });
       return map;
     }
 
-    // 依「菜單原始上傳順序」取得品項的排序索引；找不到的品項排到最後
     function getMenuOrderIndex(name) {
       const idx = currentMenuData.findIndex(m => m.name === name);
       return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
     }
 
-    // 將明細/發放清單的 key（格式為「品項名稱」或「品項名稱 (備註)」）依菜單順序排序
-    // 同一品項（不同備註）之間，再依備註文字排序，避免順序不穩定
     function sortKeysByMenuOrder(keys) {
       return keys.sort((a, b) => {
         const parenIdxA = a.indexOf(' (');
@@ -1610,7 +1570,6 @@
       await showCustomAlert('📋 已成功將帶有分單標題的 Line 報餐訊息複製至剪貼簿！');
     }
 
-    // ---------- 收錢 / 對帳 ----------
     function switchViewMode(mode) {
       viewMode = mode;
       document.getElementById('btn-view-person').className = mode === 'person' ? 'bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition text-xs' : 'text-slate-600 font-semibold px-3 py-1 rounded-md transition text-xs';
@@ -1666,7 +1625,6 @@
           return `
             <div class="flex flex-wrap justify-between items-center p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
               <div class="flex items-center gap-2">
-                <!-- 彈性指派分組下拉選單 -->
                 <select onchange="updateSubGroup('${o.id}', this.value)" class="border border-slate-300 text-xs p-1 rounded bg-white font-bold text-blue-700 outline-none">
                   <option value="0" ${currentSg===0?'selected':''}>不分單</option>
                   <option value="1" ${currentSg===1?'selected':''}>第1單</option>
@@ -1779,7 +1737,6 @@
       await fetchOrders();
     }
 
-    // ---------- 訂單修改彈窗 ----------
     async function openEditModal(id) {
       const order = allOrders.find(o => String(o.id) === String(id));
       if (!order) { 
@@ -1848,7 +1805,6 @@
       await fetchOrders();
     }
 
-    // ---------- 匯出 / 列印 ----------
     function exportExcel() {
       if (viewMode === 'person') {
         const rows = allOrders.map(o => {
