@@ -333,7 +333,7 @@
         <label class="block text-xs font-bold text-slate-500">➕ 為該同事加點當前菜單品項：</label>
         <div class="flex gap-2">
           <select id="modal-add-select" class="border border-slate-300 text-sm p-2 rounded-lg flex-1 outline-none"></select>
-          <button onclick="addModalItem()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">加點</button>
+          <button onclick="startModalItemAdd()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">加點</button>
         </div>
       </div>
 
@@ -464,6 +464,9 @@
     let editingOrderId = null;
     let editingItems = [];
     let selectedMenuIndex = null;
+    let editingCartIndex = null;     // 前台購物車：目前正在修改的購物車項目索引（null = 新增模式）
+    let editModalItemIndex = null;   // 後台修改訂單彈窗：目前正在修改的項目索引（'new' = 加點模式）
+    let editModalMenuIdx = null;     // 後台修改訂單彈窗：目前面板對應的菜單品項索引
 
     const DRINK_KEYWORDS = ['茶','咖啡','可樂','汽水','果汁','豆漿','奶茶','可可','紅茶','綠茶','冬瓜','紅葉','珍奶','飲料','奶昔','氣泡水','沙士','湯','羹','味噌湯','玉米濃湯','清湯','酸辣湯','牛肉湯'];
     const DIET_WARNING_KEYWORDS = ['素','全素','蔬食','過敏','禁忌','不吃','不含'];
@@ -550,7 +553,11 @@
       const { data } = await sb.from('menus').select('*').eq('is_active', true).eq('room', ROOM).limit(1);
       if (data && data.length > 0) {
         currentActiveMenuId = data[0].id;
-        currentMenuData = data[0].data || [];
+        currentMenuData = (data[0].data || []).map(it => ({
+          ...it,
+          sizes: it.sizes || [],
+          addOns: normalizeAddOnGroups(it.addOns)
+        }));
         currentMenuImageUrl = data[0].menu_image_url || "";
         currentDeliveryThreshold = data[0].delivery_threshold || "";
         currentOrderInfo = data[0].order_info || "";
@@ -686,7 +693,175 @@
       dropdown.classList.remove('hidden');
     }
 
-    function selectMenuItem(origIdx) {
+    // 將加點加價選項的價格/規格額外費用格式化：正數顯示 (+$n)，負數顯示 (-$n)，0 則不顯示
+    function formatExtra(n) {
+      const v = n || 0;
+      if (v === 0) return '';
+      return v > 0 ? `(+$${v})` : `(-$${Math.abs(v)})`;
+    }
+
+    // 避免「加點」品項名稱本身已含「加」或「不加」字樣時，明細出現重複的「加」字
+    function formatAddonNote(name) {
+      const n = String(name || '');
+      if (n.startsWith('加') || n.startsWith('不')) return n;
+      return `加${n}`;
+    }
+
+    // 將加點加價選項欄位資料統一轉為「分組」結構（陣列的陣列），相容舊資料（單一扁平陣列）
+    function normalizeAddOnGroups(raw) {
+      if (!raw || !raw.length) return [];
+      if (Array.isArray(raw[0])) return raw; // 已經是分組格式
+      return [raw]; // 舊格式（扁平陣列）→ 包成單一群組
+    }
+
+    // 產生「選擇規格 / 加點加價選項 / 備註 / 數量」客製化面板的共用 HTML
+    // ctx：面板識別前綴（例如 'main' 前台、'modal' 後台修改視窗），確保多個面板 id 不互相衝突
+    // prefill：{ sizeSel: [每組已選擇的索引], addonSel: [[每組每項是否勾選]], note: '自訂備註文字', qty: 數量 }
+    function buildCustomizeHtml(ctx, menuIdx, item, prefill) {
+      const sizeGroups = (item.sizes && item.sizes.length) ? item.sizes : [];
+      const multiGroupSizes = sizeGroups.filter(g => g && g.length > 1);
+      const addOnGroups = (item.addOns && item.addOns.length) ? item.addOns : [];
+      const sizeSel = prefill.sizeSel || [];
+      const addonSel = prefill.addonSel || [];
+      const note = prefill.note || '';
+      const qty = prefill.qty || 1;
+
+      const sizeHtml = sizeGroups.map((group, gIdx) => {
+        if (!group || group.length <= 1) return '';
+        const selIdx = (sizeSel[gIdx] !== undefined && sizeSel[gIdx] !== null) ? sizeSel[gIdx] : 0;
+        return `
+          <div class="text-xs space-y-1">
+            <span class="font-bold text-slate-600">選擇規格${multiGroupSizes.length > 1 ? ` (${gIdx + 1})` : ''}：</span>
+            <div class="flex flex-wrap gap-3">
+              ${group.map((s, sIdx) => `
+                <label class="inline-flex items-center gap-1 cursor-pointer select-none">
+                  <input type="radio" name="${ctx}-size-${menuIdx}-${gIdx}" value="${sIdx}" ${sIdx === selIdx ? 'checked' : ''} onchange="updateCustomizeCalc('${ctx}', ${menuIdx})" class="text-blue-600">
+                  <span>${s.name} ${formatExtra(s.extra)}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const addOnHtml = addOnGroups.map((group, gIdx) => {
+        if (!group || !group.length) return '';
+        const selArr = addonSel[gIdx] || [];
+        return `
+          <div class="text-xs space-y-1">
+            <span class="font-bold text-slate-600">加點加價選項${addOnGroups.length > 1 ? ` (${gIdx + 1})` : ''}：</span>
+            <div class="flex flex-wrap gap-3">
+              ${group.map((a, aIdx) => `
+                <label class="inline-flex items-center gap-1 cursor-pointer select-none">
+                  <input type="checkbox" id="${ctx}-addon-${menuIdx}-${gIdx}-${aIdx}" ${selArr[aIdx] ? 'checked' : ''} onchange="updateCustomizeCalc('${ctx}', ${menuIdx})" class="rounded text-blue-600">
+                  <span>${a.name} ${formatExtra(a.price)}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        ${sizeHtml}
+        ${addOnHtml}
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-1">
+          <input type="text" id="${ctx}-note-${menuIdx}" value="${escapeHtml(note)}" oninput="updateCustomizeCalc('${ctx}', ${menuIdx})" placeholder="其他備註" class="border border-slate-300 text-xs p-2 rounded-lg w-full sm:w-56 outline-none bg-white">
+
+          <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto flex-wrap">
+            <div class="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shrink-0">
+              <button type="button" onclick="changeCustomizeQty('${ctx}', ${menuIdx}, -1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-r border-slate-300 select-none">-</button>
+              <input type="number" id="${ctx}-qty-${menuIdx}" value="${qty}" min="1" onchange="updateCustomizeCalc('${ctx}', ${menuIdx})" class="w-9 text-center text-xs font-bold focus:outline-none p-1">
+              <button type="button" onclick="changeCustomizeQty('${ctx}', ${menuIdx}, 1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-l border-slate-300 select-none">+</button>
+            </div>
+            <span class="text-xs font-bold text-slate-700 shrink-0">小計: $<span id="${ctx}-calc-${menuIdx}">0</span></span>
+            <span id="${ctx}-confirm-slot-${menuIdx}" class="shrink-0"></span>
+          </div>
+        </div>
+      `;
+    }
+
+    // 讀取目前面板（ctx + menuIdx）上使用者的選擇，計算價格與備註文字
+    function getCustomizeDetails(ctx, menuIdx) {
+      const item = currentMenuData[menuIdx];
+      if (!item) return null;
+
+      let singleUnitPrice = item.price;
+      let specNotes = [];
+      let sizeSel = [];
+      let addonSel = [];
+
+      const sizeGroups = item.sizes || [];
+      sizeGroups.forEach((group, gIdx) => {
+        if (!group || !group.length) { sizeSel.push(0); return; }
+        let selIdx = 0;
+        if (group.length > 1) {
+          const selectedEle = document.querySelector(`input[name="${ctx}-size-${menuIdx}-${gIdx}"]:checked`);
+          selIdx = selectedEle ? parseInt(selectedEle.value) : 0;
+        }
+        sizeSel.push(selIdx);
+        const selectedOpt = group[selIdx];
+        if (selectedOpt) {
+          singleUnitPrice += (selectedOpt.extra || 0);
+          if (selectedOpt.name !== '標準') specNotes.push(selectedOpt.name);
+        }
+      });
+
+      const addOnGroups = item.addOns || [];
+      addOnGroups.forEach((group, gIdx) => {
+        const arr = [];
+        (group || []).forEach((a, aIdx) => {
+          const chk = document.getElementById(`${ctx}-addon-${menuIdx}-${gIdx}-${aIdx}`);
+          const checked = !!(chk && chk.checked);
+          arr.push(checked);
+          if (checked) {
+            singleUnitPrice += a.price;
+            specNotes.push(formatAddonNote(a.name));
+          }
+        });
+        addonSel.push(arr);
+      });
+
+      const noteInput = document.getElementById(`${ctx}-note-${menuIdx}`);
+      const customNote = noteInput ? noteInput.value.trim() : '';
+      if (customNote) specNotes.push(customNote);
+
+      const qtyInput = document.getElementById(`${ctx}-qty-${menuIdx}`);
+      const qty = qtyInput ? (parseInt(qtyInput.value) || 1) : 1;
+
+      return {
+        name: item.name,
+        price: singleUnitPrice,
+        qty: qty,
+        note: specNotes.join(', '),
+        category: item.category || guessCategory(item.name),
+        _sizeSel: sizeSel,
+        _addonSel: addonSel,
+        _customNote: customNote
+      };
+    }
+
+    function updateCustomizeCalc(ctx, menuIdx) {
+      const details = getCustomizeDetails(ctx, menuIdx);
+      const calcSpan = document.getElementById(`${ctx}-calc-${menuIdx}`);
+      if (details && calcSpan) {
+        calcSpan.innerText = details.price * details.qty;
+      }
+    }
+
+    function changeCustomizeQty(ctx, menuIdx, delta) {
+      const input = document.getElementById(`${ctx}-qty-${menuIdx}`);
+      if (!input) return;
+      let val = parseInt(input.value) || 1;
+      val = Math.max(1, val + delta);
+      input.value = val;
+      updateCustomizeCalc(ctx, menuIdx);
+    }
+
+    // ================= 前台：選擇/修改餐點面板 =================
+    // prefill 若有帶入，代表是從購物車「修改」按鈕開啟；若未帶入，代表是從搜尋下拉選單重新選購（會自動取消修改模式）
+    function selectMenuItem(origIdx, prefill) {
+      if (!prefill) editingCartIndex = null;
       selectedMenuIndex = origIdx;
       const item = currentMenuData[origIdx];
       if (!item) return;
@@ -695,133 +870,72 @@
       document.getElementById('menu-dropdown-list').classList.add('hidden');
 
       const panel = document.getElementById('selected-item-panel');
-      const sizeGroups = item.sizes && item.sizes.length ? item.sizes : [];
-      const multiGroupSizes = sizeGroups.filter(g => g && g.length > 1);
-      const addOns = item.addOns || [];
+      const pf = prefill || { sizeSel: [], addonSel: [], note: '', qty: 1 };
 
       panel.innerHTML = `
         <div class="flex justify-between items-center border-b pb-2">
           <span class="font-bold text-base text-slate-800">🛒 正在點購：${item.name}</span>
           <span class="text-sm font-extrabold text-rose-600">$${item.price}</span>
         </div>
-
-        ${sizeGroups.map((group, gIdx) => {
-          if (!group || group.length <= 1) return '';
-          return `
-            <div class="text-xs space-y-1">
-              <span class="font-bold text-slate-600">選擇規格${multiGroupSizes.length > 1 ? ` (${gIdx + 1})` : ''}：</span>
-              <div class="flex flex-wrap gap-3">
-                ${group.map((s, sIdx) => `
-                  <label class="inline-flex items-center gap-1 cursor-pointer select-none">
-                    <input type="radio" name="size-${origIdx}-${gIdx}" value="${sIdx}" ${sIdx===0?'checked':''} onchange="updateItemCalc(${origIdx})" class="text-blue-600">
-                    <span>${s.name} ${s.extra > 0 ? `(+$${s.extra})` : ''}</span>
-                  </label>
-                `).join('')}
-              </div>
-            </div>
-          `;
-        }).join('')}
-
-        ${addOns.length > 0 ? `
-          <div class="text-xs space-y-1">
-            <span class="font-bold text-slate-600">加點加價選項：</span>
-            <div class="flex flex-wrap gap-3">
-              ${addOns.map((a, aIdx) => `
-                <label class="inline-flex items-center gap-1 cursor-pointer select-none">
-                  <input type="checkbox" id="addon-${origIdx}-${aIdx}" value="${aIdx}" onchange="updateItemCalc(${origIdx})" class="rounded text-blue-600">
-                  <span>${a.name} (+$${a.price})</span>
-                </label>
-              `).join('')}
-            </div>
-          </div>
-        ` : ''}
-
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-1">
-          <input type="text" id="note-${origIdx}" placeholder="其他備註" class="border border-slate-300 text-xs p-2 rounded-lg w-full sm:w-56 outline-none bg-white">
-
-          <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
-            <div class="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shrink-0">
-              <button type="button" onclick="changeQuantity(${origIdx}, -1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-r border-slate-300 select-none">-</button>
-              <input type="number" id="qty-${origIdx}" value="1" min="1" onchange="updateItemCalc(${origIdx})" class="w-9 text-center text-xs font-bold focus:outline-none p-1">
-              <button type="button" onclick="changeQuantity(${origIdx}, 1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-l border-slate-300 select-none">+</button>
-            </div>
-
-            <span class="text-xs font-bold text-slate-700 shrink-0">小計: $<span id="item-calc-${origIdx}">${item.price}</span></span>
-            <button onclick="addToCart(${origIdx})" ${!isOrderingOpen ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition shrink-0">
-              🛒 加入購物車
-            </button>
-          </div>
-        </div>
+        ${buildCustomizeHtml('main', origIdx, item, pf)}
       `;
 
+      const confirmSlot = document.getElementById(`main-confirm-slot-${origIdx}`);
+      if (confirmSlot) {
+        confirmSlot.innerHTML = `
+          <button onclick="confirmMainPanel(${origIdx})" ${!isOrderingOpen ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition">
+            ${editingCartIndex !== null ? '💾 更新購物車' : '🛒 加入購物車'}
+          </button>
+        `;
+      }
+
       panel.classList.remove('hidden');
-      updateItemCalc(origIdx);
+      updateCustomizeCalc('main', origIdx);
     }
 
-    function changeQuantity(idx, delta) {
-      const input = document.getElementById(`qty-${idx}`);
-      if (!input) return;
-      let val = parseInt(input.value) || 1;
-      val = Math.max(1, val + delta);
-      input.value = val;
-      updateItemCalc(idx);
-    }
-
-    function getItemCalculatedDetails(idx) {
-      const item = currentMenuData[idx];
-      if (!item) return null;
-
-      let singleUnitPrice = item.price;
-      let specNotes = [];
-
-      const sizeGroups = item.sizes || [];
-      sizeGroups.forEach((group, gIdx) => {
-        if (!group || !group.length) return;
-        let selectedOpt = null;
-        if (group.length > 1) {
-          const selectedEle = document.querySelector(`input[name="size-${idx}-${gIdx}"]:checked`);
-          selectedOpt = selectedEle ? group[parseInt(selectedEle.value)] : group[0];
-        } else {
-          selectedOpt = group[0];
-        }
-        if (selectedOpt) {
-          singleUnitPrice += (selectedOpt.extra || 0);
-          if (selectedOpt.name !== '標準') specNotes.push(selectedOpt.name);
-        }
-      });
-
-      const addOns = item.addOns || [];
-      addOns.forEach((a, aIdx) => {
-        const chk = document.getElementById(`addon-${idx}-${aIdx}`);
-        if (chk && chk.checked) {
-          singleUnitPrice += a.price;
-          specNotes.push(`加${a.name}`);
-        }
-      });
-
-      const noteInput = document.getElementById(`note-${idx}`);
-      if (noteInput && noteInput.value.trim()) {
-        specNotes.push(noteInput.value.trim());
+    async function confirmMainPanel(menuIdx) {
+      if (!isOrderingOpen) {
+        await showCustomAlert('已結單，停止接收新訂單！');
+        return;
       }
+      const details = getCustomizeDetails('main', menuIdx);
+      if (!details) return;
 
-      const qtyInput = document.getElementById(`qty-${idx}`);
-      const qty = qtyInput ? (parseInt(qtyInput.value) || 1) : 1;
+      if (editingCartIndex !== null) {
+        userCart[editingCartIndex] = details;
+        editingCartIndex = null;
+      } else {
+        userCart.push(details);
+      }
+      userCart = mergeCartItems(userCart);
+      renderCart();
 
-      return {
-        name: item.name,
-        price: singleUnitPrice,
-        qty: qty,
-        note: specNotes.join(', '),
-        category: item.category || guessCategory(item.name)
+      document.getElementById('search-menu-input').value = '';
+      document.getElementById('selected-item-panel').classList.add('hidden');
+      document.getElementById('selected-item-panel').innerHTML = '';
+      selectedMenuIndex = null;
+    }
+
+    // 從購物車點擊「修改」，開啟與「選擇餐點」相同的面板並帶入原本的選擇
+    function editCartItem(idx) {
+      if (!isOrderingOpen) return;
+      const item = userCart[idx];
+      if (!item) return;
+      const menuIdx = currentMenuData.findIndex(m => m.name === item.name);
+      if (menuIdx === -1) {
+        showCustomAlert('此品項已不在目前菜單中，無法使用選單直接修改，請先移除後重新選購。');
+        return;
+      }
+      editingCartIndex = idx;
+      const prefill = {
+        sizeSel: item._sizeSel || [],
+        addonSel: item._addonSel || [],
+        note: item._customNote !== undefined ? item._customNote : (item.note || ''),
+        qty: item.qty
       };
-    }
-
-    function updateItemCalc(idx) {
-      const details = getItemCalculatedDetails(idx);
-      const calcSpan = document.getElementById(`item-calc-${idx}`);
-      if (details && calcSpan) {
-        calcSpan.innerText = details.price * details.qty;
-      }
+      selectMenuItem(menuIdx, prefill);
+      const panel = document.getElementById('selected-item-panel');
+      if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function guessCategory(name) {
@@ -845,23 +959,6 @@
       return sorted;
     }
 
-    async function addToCart(menuIdx) {
-      if (!isOrderingOpen) {
-        await showCustomAlert('已結單，停止接收新訂單！');
-        return;
-      }
-      const details = getItemCalculatedDetails(menuIdx);
-      if (!details) return;
-
-      userCart.push(details);
-      userCart = mergeCartItems(userCart);
-      renderCart();
-
-      document.getElementById('search-menu-input').value = '';
-      document.getElementById('selected-item-panel').classList.add('hidden');
-      selectedMenuIndex = null;
-    }
-
     function renderCart() {
       const container = document.getElementById('cart-list');
       let total = 0;
@@ -883,6 +980,7 @@
             </div>
             <div class="flex items-center gap-3">
               <span class="font-bold text-sm text-slate-800">$${subtotal}</span>
+              <button onclick="editCartItem(${idx})" ${!isOrderingOpen ? 'disabled' : ''} class="text-blue-600 disabled:text-slate-300 text-xs font-semibold hover:underline disabled:no-underline disabled:cursor-not-allowed">修改</button>
               <button onclick="removeFromCart(${idx})" ${!isOrderingOpen ? 'disabled' : ''} class="text-rose-600 disabled:text-slate-300 text-xs font-semibold hover:underline disabled:no-underline disabled:cursor-not-allowed">移除</button>
             </div>
           </div>
@@ -891,9 +989,22 @@
       document.getElementById('cart-total-price').innerText = `NT$ ${total}`;
     }
 
+    function resetSelectedItemPanel() {
+      editingCartIndex = null;
+      selectedMenuIndex = null;
+      const panel = document.getElementById('selected-item-panel');
+      if (panel) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+      }
+      const searchInput = document.getElementById('search-menu-input');
+      if (searchInput) searchInput.value = '';
+    }
+
     function removeFromCart(idx) {
       if (!isOrderingOpen) return;
       userCart.splice(idx, 1);
+      if (editingCartIndex !== null) resetSelectedItemPanel();
       renderCart();
     }
 
@@ -901,6 +1012,7 @@
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
         const name = document.getElementById('user-name-input').value.trim();
+        resetSelectedItemPanel();
         if (!name) {
           userCart = [];
           renderCart();
@@ -956,9 +1068,8 @@
           await showCustomAlert(`❌ 訂單送出失敗：${error.message || '請確認資料庫權限或網路連線！'}`);
         } else {
           await showCustomAlert(`🎉 訂購成功！${name} 應付 $${total} 元`);
-          
-          document.getElementById('search-menu-input').value = '';
-          document.getElementById('selected-item-panel').classList.add('hidden');
+
+          resetSelectedItemPanel();
 
           await fetchOrders();
         }
@@ -1102,7 +1213,7 @@
 
     function parseSpecColumn(raw) {
       if (!raw) return [];
-      return String(raw).split(';').map(group => {
+      return String(raw).split(/[\;\；]/).map(group => {
         const trimmedGroup = group.trim();
         if (!trimmedGroup) return null;
         
@@ -1115,12 +1226,21 @@
       }).filter(g => g && g.length > 0);
     }
 
+    // 加點加價選項欄位：用 ";"（或全形「；」）分成多組，組內用 "/" 分隔各選項，
+    // 讓「加點加價選項」也能像「規格」一樣分組顯示（例如：少麵/加麵；牛肉/豬肉；不加蔥/不加菜）
     function parseAddOnColumn(raw) {
       if (!raw) return [];
-      return String(raw).split(/[\/\／]/).map(part => {
-        const [name, price] = part.split(/[\:\：]/);
-        return { name: (name || '').trim(), price: parseInt(price) || 0 };
-      }).filter(a => a.name);
+      return String(raw).split(/[\;\；]/).map(group => {
+        const trimmedGroup = group.trim();
+        if (!trimmedGroup) return null;
+
+        const options = trimmedGroup.split(/[\/\／]/).map(part => {
+          const [name, price] = part.split(/[\:\：]/);
+          return { name: (name || '').trim(), price: parseInt(price) || 0 };
+        }).filter(a => a.name);
+
+        return options;
+      }).filter(g => g && g.length > 0);
     }
 
     async function updateMenuInfoOnly() {
@@ -1324,7 +1444,7 @@
 
       const rows = menuList.map(item => {
         const specStr = item.sizes ? item.sizes.map(group => (group || []).map(s => `${s.name}:${s.extra}`).join('/')).join(';') : '';
-        const addOnStr = item.addOns ? item.addOns.map(a => `${a.name}:${a.price}`).join('/') : '';
+        const addOnStr = item.addOns ? normalizeAddOnGroups(item.addOns).map(group => (group || []).map(a => `${a.name}:${a.price}`).join('/')).join(';') : '';
         const categoryStr = item.category === 'drink' ? '飲料' : '餐點';
 
         return {
@@ -1744,6 +1864,8 @@
       }
       editingOrderId = id;
       editingItems = mergeCartItems(JSON.parse(JSON.stringify(order.items)));
+      editModalItemIndex = null;
+      editModalMenuIdx = null;
 
       document.getElementById('modal-user-name').innerText = order.user_name;
 
@@ -1754,40 +1876,141 @@
       document.getElementById('edit-order-modal').classList.remove('hidden');
     }
 
+    // 修改訂單彈窗：與前台「修改」一致，改為直接點選規格/加點加價選項，金額會自動重新計算
     function renderModalItems() {
       const container = document.getElementById('modal-items-list');
       let total = 0;
-      container.innerHTML = editingItems.map((item, idx) => {
+
+      const rowsHtml = editingItems.map((item, idx) => {
         const subtotal = item.price * item.qty;
         total += subtotal;
+
+        if (editModalItemIndex === idx) {
+          const menuItem = currentMenuData[editModalMenuIdx];
+          if (!menuItem) return '';
+          const prefill = {
+            sizeSel: item._sizeSel || [],
+            addonSel: item._addonSel || [],
+            note: item._customNote !== undefined ? item._customNote : (item.note || ''),
+            qty: item.qty
+          };
+          return `
+            <div class="p-3 bg-blue-50 rounded-xl border border-blue-200 space-y-2">
+              <div class="flex justify-between items-center border-b border-blue-100 pb-1.5">
+                <span class="font-bold text-slate-800">✏️ 修改：${menuItem.name}</span>
+                <span class="text-xs font-extrabold text-rose-600">$${menuItem.price}</span>
+              </div>
+              ${buildCustomizeHtml('modal', editModalMenuIdx, menuItem, prefill)}
+            </div>
+          `;
+        }
+
         return `
           <div class="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-200">
             <div>
               <div class="font-bold text-slate-800">${item.name}</div>
-              <input type="text" value="${item.note || ''}" onchange="editingItems[${idx}].note=this.value" placeholder="其他備註" class="text-xs border border-slate-300 rounded p-1 mt-1 w-40 outline-none">
+              ${item.note ? `<div class="text-xs text-amber-700 font-semibold mt-0.5">${item.note}</div>` : ''}
+              <div class="text-xs text-slate-400 mt-0.5">$${item.price} x ${item.qty}</div>
             </div>
             <div class="flex items-center gap-2">
-              <input type="number" min="1" value="${item.qty}" onchange="editingItems[${idx}].qty=parseInt(this.value)||1;renderModalItems();" class="w-12 border border-slate-300 rounded text-center p-1 font-semibold text-xs">
               <span class="font-bold text-sm text-slate-800">$${subtotal}</span>
+              <button type="button" onclick="startModalItemEdit(${idx})" class="text-blue-600 text-xs font-semibold hover:underline">修改</button>
               <button type="button" onclick="editingItems.splice(${idx},1);renderModalItems();" class="text-rose-600 text-xs font-semibold hover:underline">刪除</button>
             </div>
           </div>
         `;
       }).join('');
-      document.getElementById('modal-total-price').innerText = total;
-    }
 
-    function addModalItem() {
-      const idx = document.getElementById('modal-add-select').value;
-      const item = currentMenuData[idx];
-      if (item) {
-        editingItems.push({ name: item.name, price: item.price, qty: 1, note: '', category: item.category || guessCategory(item.name) });
-        editingItems = mergeCartItems(editingItems);
-        renderModalItems();
+      let addRowHtml = '';
+      if (editModalItemIndex === 'new' && currentMenuData[editModalMenuIdx]) {
+        const menuItem = currentMenuData[editModalMenuIdx];
+        const prefill = { sizeSel: [], addonSel: [], note: '', qty: 1 };
+        addRowHtml = `
+          <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2">
+            <div class="flex justify-between items-center border-b border-emerald-100 pb-1.5">
+              <span class="font-bold text-slate-800">➕ 加點：${menuItem.name}</span>
+              <span class="text-xs font-extrabold text-rose-600">$${menuItem.price}</span>
+            </div>
+            ${buildCustomizeHtml('modal', editModalMenuIdx, menuItem, prefill)}
+          </div>
+        `;
+      }
+
+      container.innerHTML = rowsHtml + addRowHtml;
+      document.getElementById('modal-total-price').innerText = total;
+
+      // 填入該面板的確認/取消按鈕，並立即計算小計
+      if (editModalItemIndex !== null && currentMenuData[editModalMenuIdx]) {
+        const confirmSlot = document.getElementById(`modal-confirm-slot-${editModalMenuIdx}`);
+        if (confirmSlot) {
+          if (editModalItemIndex === 'new') {
+            confirmSlot.innerHTML = `
+              <button type="button" onclick="cancelModalItemEdit()" class="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-xs font-semibold">取消</button>
+              <button type="button" onclick="confirmModalItemAdd()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">加入</button>
+            `;
+          } else {
+            confirmSlot.innerHTML = `
+              <button type="button" onclick="cancelModalItemEdit()" class="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-xs font-semibold">取消</button>
+              <button type="button" onclick="confirmModalItemEdit(${editModalItemIndex})" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">儲存此項</button>
+            `;
+          }
+        }
+        updateCustomizeCalc('modal', editModalMenuIdx);
       }
     }
 
-    function closeEditModal() { document.getElementById('edit-order-modal').classList.add('hidden'); }
+    function startModalItemEdit(idx) {
+      const item = editingItems[idx];
+      if (!item) return;
+      const menuIdx = currentMenuData.findIndex(m => m.name === item.name);
+      if (menuIdx === -1) {
+        showCustomAlert('此品項已不在目前菜單中，無法使用選單直接修改，僅能刪除。');
+        return;
+      }
+      editModalItemIndex = idx;
+      editModalMenuIdx = menuIdx;
+      renderModalItems();
+    }
+
+    function startModalItemAdd() {
+      const idx = parseInt(document.getElementById('modal-add-select').value);
+      if (isNaN(idx) || !currentMenuData[idx]) return;
+      editModalItemIndex = 'new';
+      editModalMenuIdx = idx;
+      renderModalItems();
+    }
+
+    function cancelModalItemEdit() {
+      editModalItemIndex = null;
+      editModalMenuIdx = null;
+      renderModalItems();
+    }
+
+    function confirmModalItemEdit(idx) {
+      const details = getCustomizeDetails('modal', editModalMenuIdx);
+      if (!details) return;
+      editingItems[idx] = details;
+      editModalItemIndex = null;
+      editModalMenuIdx = null;
+      editingItems = mergeCartItems(editingItems);
+      renderModalItems();
+    }
+
+    function confirmModalItemAdd() {
+      const details = getCustomizeDetails('modal', editModalMenuIdx);
+      if (!details) return;
+      editingItems.push(details);
+      editModalItemIndex = null;
+      editModalMenuIdx = null;
+      editingItems = mergeCartItems(editingItems);
+      renderModalItems();
+    }
+
+    function closeEditModal() {
+      editModalItemIndex = null;
+      editModalMenuIdx = null;
+      document.getElementById('edit-order-modal').classList.add('hidden');
+    }
 
     async function saveEditModal() {
       const finalEditingItems = mergeCartItems(editingItems);
