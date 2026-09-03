@@ -26,7 +26,7 @@
     <div class="max-w-4xl mx-auto flex justify-between items-center">
       <div>
         <h1 id="app-title" class="text-xl font-bold flex items-center gap-2">
-          <select id="room-select" onchange="switchRoom(this.value)" class="bg-blue-700 hover:bg-blue-800 text-white text-sm font-bold rounded-lg pl-2 pr-1.5 py-1 border border-blue-400 outline-none cursor-pointer transition">
+          <select id="room-select" onchange="switchRoom(this.value)" class="bg-white hover:bg-blue-50 text-blue-700 text-lg font-extrabold rounded-lg pl-3 pr-2 py-2 border-2 border-blue-200 outline-none cursor-pointer transition shadow-sm hover:shadow-md">
             <option value="" id="room-option-default">團購</option>
             <option value="1" id="room-option-1">團購1</option>
             <option value="2" id="room-option-2">團購2</option>
@@ -38,7 +38,7 @@
             <option value="8" id="room-option-8">團購8</option>
             <option value="9" id="room-option-9">團購9</option>
           </select>
-          <span>🍔</span> <span id="app-title-text">團隊團購點餐系統</span>
+          <span id="app-title-text" class="hidden"></span>
         </h1>
         <p id="broadcast-bar" class="text-xs text-blue-100 mt-0.5">📢 載入廣播資訊中...</p>
       </div>
@@ -518,8 +518,8 @@
     }
 
     // 更新頂部「團購N」下拉選單各選項的顯示文字：
-    // 有開放點餐 → 團購N-店家名稱（若尚未設定菜單則僅顯示 團購N）
-    // 無開放點餐（已結單）→ 團購N-已結單
+    // 有開放點餐 → 團購N：店家名稱（若尚未設定菜單則僅顯示 團購N）
+    // 無開放點餐（已結單）→ 僅顯示 團購N
     async function updateRoomSelectLabels() {
       // 'default' 對應網址沒有帶 ?room= 參數時的「團購」選項
       const roomIds = ['default','1','2','3','4','5','6','7','8','9'];
@@ -553,9 +553,9 @@
           const isOpen = statusMap.hasOwnProperty(id) ? statusMap[id] : true;
           if (isOpen) {
             const menuName = menuMap[id];
-            optionEl.innerText = menuName ? `${label}-【${menuName}】` : label;
+            optionEl.innerText = menuName ? `${label}：【${menuName}】` : label;
           } else {
-            optionEl.innerText = `${label}-已結單`;
+            optionEl.innerText = label;
           }
         });
       } catch (e) {
@@ -578,13 +578,12 @@
       if (data) {
         const cutoff = data.find(s => s.key === roomKey('cutoff_time'));
         const status = data.find(s => s.key === roomKey('is_active'));
-        const roomTag = ROOM !== 'default' ? `【團購${ROOM}】` : '';
         if (cutoff) {
           const val = typeof cutoff.value === 'string' ? cutoff.value.replace(/"/g, '') : cutoff.value;
           document.getElementById('cutoff-time-input').value = val;
-          document.getElementById('broadcast-bar').innerText = val ? `📢 ${roomTag}預計 ${val} 結單，請儘速下單！` : `📢 ${roomTag}尚未設定結單時間`;
+          document.getElementById('broadcast-bar').innerText = val ? `📢 預計 ${val} 結單，請儘速下單！` : `📢 尚未設定結單時間`;
         } else {
-          document.getElementById('broadcast-bar').innerText = `📢 ${roomTag}尚未設定結單時間`;
+          document.getElementById('broadcast-bar').innerText = `📢 尚未設定結單時間`;
         }
         if (status) {
           isOrderingOpen = status.value === 'true' || status.value === true;
@@ -1216,8 +1215,7 @@
     async function saveCutoffTime() {
       const val = document.getElementById('cutoff-time-input').value.trim();
       await sb.from('settings').upsert({ key: roomKey('cutoff_time'), value: JSON.stringify(val) });
-      const roomTag = ROOM !== 'default' ? `【團購${ROOM}】` : '';
-      document.getElementById('broadcast-bar').innerText = `📢 ${roomTag}預計 ${val} 結單，請儘速下單！`;
+      document.getElementById('broadcast-bar').innerText = `📢 預計 ${val} 結單，請儘速下單！`;
       await showCustomAlert('預計結單時間已廣播！');
     }
 
