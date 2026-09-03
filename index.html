@@ -27,7 +27,7 @@
       <div>
         <h1 id="app-title" class="text-xl font-bold flex items-center gap-2">
           <select id="room-select" onchange="switchRoom(this.value)" class="bg-blue-700 hover:bg-blue-800 text-white text-sm font-bold rounded-lg pl-2 pr-1.5 py-1 border border-blue-400 outline-none cursor-pointer transition">
-            <option value="">團購</option>
+            <option value="" id="room-option-default">團購</option>
             <option value="1" id="room-option-1">團購1</option>
             <option value="2" id="room-option-2">團購2</option>
             <option value="3" id="room-option-3">團購3</option>
@@ -521,7 +521,8 @@
     // 有開放點餐 → 團購N-店家名稱（若尚未設定菜單則僅顯示 團購N）
     // 無開放點餐（已結單）→ 團購N-已結單
     async function updateRoomSelectLabels() {
-      const roomIds = ['1','2','3','4','5','6','7','8','9'];
+      // 'default' 對應網址沒有帶 ?room= 參數時的「團購」選項
+      const roomIds = ['default','1','2','3','4','5','6','7','8','9'];
       const statusKeys = roomIds.map(id => `is_active_room_${id}`);
 
       try {
@@ -532,7 +533,7 @@
 
         const statusMap = {};
         (settingsData || []).forEach(s => {
-          const m = String(s.key).match(/^is_active_room_(\d+)$/);
+          const m = String(s.key).match(/^is_active_room_(default|\d+)$/);
           if (m) {
             const val = typeof s.value === 'string' ? s.value.replace(/"/g, '') : s.value;
             statusMap[m[1]] = (val === 'true' || val === true);
@@ -547,13 +548,14 @@
         roomIds.forEach(id => {
           const optionEl = document.getElementById(`room-option-${id}`);
           if (!optionEl) return;
+          const label = (id === 'default') ? '團購' : `團購${id}`;
           // 尚未設定過開關狀態時，預設視為「開放點餐中」（與 fetchSettings 邏輯一致）
           const isOpen = statusMap.hasOwnProperty(id) ? statusMap[id] : true;
           if (isOpen) {
             const menuName = menuMap[id];
-            optionEl.innerText = menuName ? `團購${id}-${menuName}` : `團購${id}`;
+            optionEl.innerText = menuName ? `${label}-【${menuName}】` : label;
           } else {
-            optionEl.innerText = `團購${id}-已結單`;
+            optionEl.innerText = `${label}-已結單`;
           }
         });
       } catch (e) {
