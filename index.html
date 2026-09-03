@@ -26,8 +26,19 @@
     <div class="max-w-4xl mx-auto flex justify-between items-center">
       <div>
         <h1 id="app-title" class="text-xl font-bold flex items-center gap-2">
+          <select id="room-select" onchange="switchRoom(this.value)" class="bg-blue-700 hover:bg-blue-800 text-white text-sm font-bold rounded-lg pl-2 pr-1.5 py-1 border border-blue-400 outline-none cursor-pointer transition">
+            <option value="">團購</option>
+            <option value="1">團購1</option>
+            <option value="2">團購2</option>
+            <option value="3">團購3</option>
+            <option value="4">團購4</option>
+            <option value="5">團購5</option>
+            <option value="6">團購6</option>
+            <option value="7">團購7</option>
+            <option value="8">團購8</option>
+            <option value="9">團購9</option>
+          </select>
           <span>🍔</span> <span id="app-title-text">團隊團購點餐系統</span>
-          <span id="room-badge" class="hidden text-xs bg-blue-800 px-2 py-0.5 rounded-full font-semibold"></span>
         </h1>
         <p id="broadcast-bar" class="text-xs text-blue-100 mt-0.5">📢 載入廣播資訊中...</p>
       </div>
@@ -447,6 +458,17 @@
       return `${baseKey}_room_${ROOM}`;
     }
 
+    // 切換團購（下拉選單觸發）：更新網址 ?room= 參數並重新載入頁面
+    function switchRoom(value) {
+      const url = new URL(window.location.href);
+      if (value) {
+        url.searchParams.set('room', value);
+      } else {
+        url.searchParams.delete('room');
+      }
+      window.location.href = url.toString();
+    }
+
     let currentMenuData = [];      
     let currentActiveMenuId = null;
     let currentMenuImageUrl = "";
@@ -472,13 +494,9 @@
     const DIET_WARNING_KEYWORDS = ['素','全素','蔬食','過敏','禁忌','不吃','不含'];
 
     async function init() {
-      const roomBadgeEl = document.getElementById('room-badge');
-      if (ROOM !== 'default') {
-        roomBadgeEl.innerText = `房間 ${ROOM}`;
-        roomBadgeEl.classList.remove('hidden');
-      } else {
-        roomBadgeEl.innerText = '';
-        roomBadgeEl.classList.add('hidden');
+      const roomSelectEl = document.getElementById('room-select');
+      if (roomSelectEl) {
+        roomSelectEl.value = (ROOM === 'default') ? '' : ROOM;
       }
       loadDeliveryInfo();
       await ensureCurrentGroup();
@@ -513,7 +531,7 @@
       if (data) {
         const cutoff = data.find(s => s.key === roomKey('cutoff_time'));
         const status = data.find(s => s.key === roomKey('is_active'));
-        const roomTag = ROOM !== 'default' ? `【房間 ${ROOM}】` : '';
+        const roomTag = ROOM !== 'default' ? `【團購${ROOM}】` : '';
         if (cutoff) {
           const val = typeof cutoff.value === 'string' ? cutoff.value.replace(/"/g, '') : cutoff.value;
           document.getElementById('cutoff-time-input').value = val;
@@ -1150,7 +1168,7 @@
     async function saveCutoffTime() {
       const val = document.getElementById('cutoff-time-input').value.trim();
       await sb.from('settings').upsert({ key: roomKey('cutoff_time'), value: JSON.stringify(val) });
-      const roomTag = ROOM !== 'default' ? `【房間 ${ROOM}】` : '';
+      const roomTag = ROOM !== 'default' ? `【團購${ROOM}】` : '';
       document.getElementById('broadcast-bar').innerText = `📢 ${roomTag}預計 ${val} 結單，請儘速下單！`;
       await showCustomAlert('預計結單時間已廣播！');
     }
@@ -1470,19 +1488,19 @@
     }
 
     function loadDeliveryInfo() {
-      document.getElementById('info-unit').value = localStorage.getItem('info_unit') || '經濟部產業園區管理局';
-      document.getElementById('info-address').value = localStorage.getItem('info_address') || '高雄市楠梓區加昌路600號';
-      document.getElementById('info-phone').value = localStorage.getItem('info_phone') || '(07)361-1212#309';
-      document.getElementById('info-contact').value = localStorage.getItem('info_contact') || '徐梓恩';
-      document.getElementById('info-time').value = localStorage.getItem('info_time') || getTodayFormattedTime();
+      document.getElementById('info-unit').value = localStorage.getItem(roomKey('info_unit')) || '經濟部產業園區管理局';
+      document.getElementById('info-address').value = localStorage.getItem(roomKey('info_address')) || '高雄市楠梓區加昌路600號';
+      document.getElementById('info-phone').value = localStorage.getItem(roomKey('info_phone')) || '(07)361-1212#309';
+      document.getElementById('info-contact').value = localStorage.getItem(roomKey('info_contact')) || '徐梓恩';
+      document.getElementById('info-time').value = localStorage.getItem(roomKey('info_time')) || getTodayFormattedTime();
     }
 
     function saveDeliveryInfo() {
-      localStorage.setItem('info_unit', document.getElementById('info-unit').value);
-      localStorage.setItem('info_address', document.getElementById('info-address').value);
-      localStorage.setItem('info_phone', document.getElementById('info-phone').value);
-      localStorage.setItem('info_contact', document.getElementById('info-contact').value);
-      localStorage.setItem('info_time', document.getElementById('info-time').value);
+      localStorage.setItem(roomKey('info_unit'), document.getElementById('info-unit').value);
+      localStorage.setItem(roomKey('info_address'), document.getElementById('info-address').value);
+      localStorage.setItem(roomKey('info_phone'), document.getElementById('info-phone').value);
+      localStorage.setItem(roomKey('info_contact'), document.getElementById('info-contact').value);
+      localStorage.setItem(roomKey('info_time'), document.getElementById('info-time').value);
     }
 
     function getCategoryMap() {
