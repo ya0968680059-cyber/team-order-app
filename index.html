@@ -187,13 +187,15 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-2.5 text-sm">
-          <div><label class="text-xs font-semibold text-slate-500">訂購單位</label><input type="text" id="info-unit" oninput="saveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
-          <div><label class="text-xs font-semibold text-slate-500">外送地址</label><input type="text" id="info-address" oninput="saveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
-          <div><label class="text-xs font-semibold text-slate-500">聯絡電話</label><input type="text" id="info-phone" oninput="saveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
-          <div><label class="text-xs font-semibold text-slate-500">訂購人</label><input type="text" id="info-contact" oninput="saveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
-          <div class="col-span-2 md:col-span-1"><label class="text-xs font-semibold text-slate-500">外送時間</label><input type="text" id="info-time" oninput="saveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
+        <div class="grid grid-cols-2 md:grid-cols-6 gap-2.5 text-sm">
+          <div><label class="text-xs font-semibold text-slate-500">訂購單位</label><input type="text" id="info-unit" oninput="debounceSaveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
+          <div><label class="text-xs font-semibold text-slate-500">外送地址</label><input type="text" id="info-address" oninput="debounceSaveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
+          <div><label class="text-xs font-semibold text-slate-500">聯絡電話</label><input type="text" id="info-phone" oninput="debounceSaveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
+          <div><label class="text-xs font-semibold text-slate-500">訂購人</label><input type="text" id="info-contact" oninput="debounceSaveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
+          <div><label class="text-xs font-semibold text-slate-500">外送日期</label><input type="date" id="info-date" oninput="debounceSaveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
+          <div><label class="text-xs font-semibold text-slate-500">外送時間</label><input type="time" id="info-time" oninput="debounceSaveDeliveryInfo()" class="w-full border border-slate-300 p-1.5 rounded-lg text-sm outline-none"></div>
         </div>
+        <p id="delivery-info-sync-hint" class="text-[11px] text-slate-400">💾 已自動同步儲存，其他電腦重新整理頁面後即可看到最新內容</p>
 
         <!-- 統計卡片 -->
         <div class="grid grid-cols-3 gap-2.5 text-center">
@@ -498,7 +500,7 @@
       if (roomSelectEl) {
         roomSelectEl.value = (ROOM === 'default') ? '' : ROOM;
       }
-      loadDeliveryInfo();
+      await loadDeliveryInfo();
       await ensureCurrentGroup();
       await fetchSettings();
       await fetchActiveMenu();
@@ -1528,27 +1530,84 @@
       XLSX.writeFile(workbook, `${data.name}.xlsx`);
     }
 
-    function getTodayFormattedTime() {
+    // 【明細整理區】外送資訊欄位的 Supabase settings key 名稱對照表
+    // 注意：這幾個欄位改為存到 Supabase 的 settings 資料表（跟結單時間、狀態等其他設定一樣），
+    // 不再使用 localStorage，這樣不同電腦開啟同一個團購房間時才會同步看到最新內容。
+    const DELIVERY_INFO_FIELDS = [
+      { id: 'info-unit',    key: 'info_unit',    default: '經濟部產業園區管理局' },
+      { id: 'info-address', key: 'info_address', default: '高雄市楠梓區加昌路600號' },
+      { id: 'info-phone',   key: 'info_phone',   default: '(07)361-1212#309' },
+      { id: 'info-contact', key: 'info_contact', default: '徐梓恩' },
+      { id: 'info-date',    key: 'info_date',    default: () => getTodayDateValue() },
+      { id: 'info-time',    key: 'info_time',    default: '11:30' }
+    ];
+
+    function getTodayDateValue() {
       const now = new Date();
-      const month = now.getMonth() + 1;
-      const day = now.getDate();
-      return `${month}/${day} 上午11點30分`;
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
     }
 
-    function loadDeliveryInfo() {
-      document.getElementById('info-unit').value = localStorage.getItem(roomKey('info_unit')) || '經濟部產業園區管理局';
-      document.getElementById('info-address').value = localStorage.getItem(roomKey('info_address')) || '高雄市楠梓區加昌路600號';
-      document.getElementById('info-phone').value = localStorage.getItem(roomKey('info_phone')) || '(07)361-1212#309';
-      document.getElementById('info-contact').value = localStorage.getItem(roomKey('info_contact')) || '徐梓恩';
-      document.getElementById('info-time').value = localStorage.getItem(roomKey('info_time')) || getTodayFormattedTime();
+    // 將「外送日期」(YYYY-MM-DD) + 「外送時間」(HH:MM) 組合成中文顯示格式，例如：9/4 上午11點30分
+    function formatDeliveryDateTime(dateStr, timeStr) {
+      let datePart = '';
+      if (dateStr) {
+        const [y, m, d] = dateStr.split('-');
+        if (m && d) datePart = `${parseInt(m, 10)}/${parseInt(d, 10)}`;
+      }
+      let timePart = '';
+      if (timeStr) {
+        let [h, min] = timeStr.split(':').map(Number);
+        const period = h < 12 ? '上午' : '下午';
+        let h12 = h % 12;
+        if (h12 === 0) h12 = 12;
+        timePart = `${period}${h12}點${String(min).padStart(2, '0')}分`;
+      }
+      return [datePart, timePart].filter(Boolean).join(' ');
     }
 
-    function saveDeliveryInfo() {
-      localStorage.setItem(roomKey('info_unit'), document.getElementById('info-unit').value);
-      localStorage.setItem(roomKey('info_address'), document.getElementById('info-address').value);
-      localStorage.setItem(roomKey('info_phone'), document.getElementById('info-phone').value);
-      localStorage.setItem(roomKey('info_contact'), document.getElementById('info-contact').value);
-      localStorage.setItem(roomKey('info_time'), document.getElementById('info-time').value);
+    // 從 Supabase settings 資料表讀取這個團購房間的外送資訊，並填入輸入框
+    async function loadDeliveryInfo() {
+      const keys = DELIVERY_INFO_FIELDS.map(f => roomKey(f.key));
+      const { data, error } = await sb.from('settings').select('*').in('key', keys);
+      if (error) {
+        console.error('讀取外送資訊失敗:', error);
+      }
+      const valueMap = {};
+      (data || []).forEach(row => {
+        let val = row.value;
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch (e) { val = val.replace(/^"|"$/g, ''); }
+        }
+        valueMap[row.key] = val;
+      });
+
+      DELIVERY_INFO_FIELDS.forEach(f => {
+        const stored = valueMap[roomKey(f.key)];
+        const fallback = (typeof f.default === 'function') ? f.default() : f.default;
+        document.getElementById(f.id).value = (stored !== undefined && stored !== null && stored !== '') ? stored : fallback;
+      });
+    }
+
+    let deliveryInfoSaveTimer = null;
+    // 輸入時加上防抖動（debounce），避免每打一個字就打一次資料庫
+    function debounceSaveDeliveryInfo() {
+      clearTimeout(deliveryInfoSaveTimer);
+      deliveryInfoSaveTimer = setTimeout(saveDeliveryInfo, 500);
+    }
+
+    // 將外送資訊寫回 Supabase settings 資料表，讓所有電腦都能同步看到
+    async function saveDeliveryInfo() {
+      const rows = DELIVERY_INFO_FIELDS.map(f => ({
+        key: roomKey(f.key),
+        value: JSON.stringify(document.getElementById(f.id).value)
+      }));
+      const { error } = await sb.from('settings').upsert(rows);
+      if (error) {
+        console.error('儲存外送資訊失敗:', error);
+      }
     }
 
     function getCategoryMap() {
@@ -1707,7 +1766,7 @@
       text += `外送地址：${document.getElementById('info-address').value}\n`;
       text += `聯絡電話：${document.getElementById('info-phone').value}\n`;
       text += `訂購人：${document.getElementById('info-contact').value}\n`;
-      text += `外送時間：${document.getElementById('info-time').value}\n`;
+      text += `外送時間：${formatDeliveryDateTime(document.getElementById('info-date').value, document.getElementById('info-time').value)}\n`;
       text += `------------------------\n`;
 
       if (sortedSGs.length === 1 && sortedSGs[0] === '不分單') {
