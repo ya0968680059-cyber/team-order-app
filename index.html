@@ -1290,16 +1290,67 @@
           return;
         }
 
-        await showCustomAlert('密碼修改成功！');
+        // 先清空欄位並關閉「修改密碼」視窗，避免與下方的成功提示視窗重疊、造成畫面卡住的錯覺
         document.getElementById('pwd-old').value = '';
         document.getElementById('pwd-new1').value = '';
         document.getElementById('pwd-new2').value = '';
         closePasswordModal();
+        await showCustomAlert('密碼修改成功！');
       } catch (err) {
         console.error('修改密碼發生異常:', err);
         await showCustomAlert('密碼修改失敗，請檢查網路連線或系統設定！');
       }
     }
+
+    // ================= 全站快捷鍵：讓所有彈出視窗都能用 Enter 鍵取代滑鼠點擊「確定」 =================
+    // 依「視窗疊放優先順序」由上到下檢查：全站提示視窗(alert/confirm/prompt) > 修改密碼視窗 > 修改訂單視窗 > 菜單大圖視窗
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+
+      // 若焦點在多行輸入框(textarea)中，保留 Enter 原本「換行」的功能，不做任何攔截
+      const tag = (e.target && e.target.tagName || '').toLowerCase();
+      if (tag === 'textarea') return;
+
+      // 1. 全站自訂提示視窗（showCustomAlert / showCustomConfirm / showCustomPrompt 共用）
+      const customModal = document.getElementById('custom-modal');
+      if (customModal && !customModal.classList.contains('hidden')) {
+        e.preventDefault();
+        const confirmBtn = document.getElementById('modal-confirm-btn');
+        const okBtn = document.getElementById('modal-ok-btn');
+        (confirmBtn || okBtn)?.click();
+        return;
+      }
+
+      // 2. 修改管理密碼視窗
+      const pwdModal = document.getElementById('password-modal');
+      if (pwdModal && !pwdModal.classList.contains('hidden')) {
+        e.preventDefault();
+        submitChangePassword();
+        return;
+      }
+
+      // 3. 修改訂單／加點視窗：若正在編輯或加點單一品項，Enter 先確認該品項；否則才視為儲存整張訂單
+      const editModal = document.getElementById('edit-order-modal');
+      if (editModal && !editModal.classList.contains('hidden')) {
+        e.preventDefault();
+        if (editModalItemIndex === 'new') {
+          confirmModalItemAdd();
+        } else if (editModalItemIndex !== null) {
+          confirmModalItemEdit(editModalItemIndex);
+        } else {
+          saveEditModal();
+        }
+        return;
+      }
+
+      // 4. 菜單大圖檢視視窗：Enter 直接關閉
+      const lightboxModal = document.getElementById('menu-lightbox-modal');
+      if (lightboxModal && !lightboxModal.classList.contains('hidden')) {
+        e.preventDefault();
+        closeMenuLightbox();
+        return;
+      }
+    });
 
     function parseSpecColumn(raw) {
       if (!raw) return [];
