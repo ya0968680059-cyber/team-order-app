@@ -526,11 +526,13 @@
       // 'default' 對應網址沒有帶 ?room= 參數時的「團購」選項
       const roomIds = ['default','1','2','3','4','5','6','7','8','9'];
       const statusKeys = roomIds.map(id => `is_active_room_${id}`);
+      const dateKeys = roomIds.map(id => `info_date_room_${id}`);
 
       try {
-        const [{ data: settingsData }, { data: menusData }] = await Promise.all([
+        const [{ data: settingsData }, { data: menusData }, { data: dateData }] = await Promise.all([
           sb.from('settings').select('*').in('key', statusKeys),
-          sb.from('menus').select('room,name,is_active').eq('is_active', true).in('room', roomIds)
+          sb.from('menus').select('room,name,is_active').eq('is_active', true).in('room', roomIds),
+          sb.from('settings').select('*').in('key', dateKeys)
         ]);
 
         const statusMap = {};
@@ -547,6 +549,19 @@
           menuMap[String(m.room)] = m.name;
         });
 
+        // 讀取每個團購房間各自設定的「外送日期」，用來顯示在下拉選單的店名前面
+        const dateMap = {};
+        (dateData || []).forEach(s => {
+          const m = String(s.key).match(/^info_date_room_(default|\d+)$/);
+          if (m) {
+            let val = s.value;
+            if (typeof val === 'string') {
+              try { val = JSON.parse(val); } catch (e) { val = val.replace(/^"|"$/g, ''); }
+            }
+            dateMap[m[1]] = val;
+          }
+        });
+
         roomIds.forEach(id => {
           const optionEl = document.getElementById(`room-option-${id}`);
           if (!optionEl) return;
@@ -555,7 +570,8 @@
           const isOpen = statusMap.hasOwnProperty(id) ? statusMap[id] : true;
           if (isOpen) {
             const menuName = menuMap[id];
-            optionEl.innerText = menuName ? `${label}：【${menuName}】` : label;
+            const dateStr = formatShortDate(dateMap[id]);
+            optionEl.innerText = menuName ? `${label}：${dateStr}【${menuName}】` : label;
           } else {
             optionEl.innerText = label;
           }
@@ -563,6 +579,14 @@
       } catch (e) {
         console.error('更新團購下拉選單顯示名稱失敗:', e);
       }
+    }
+
+    // 將「外送日期」(YYYY-MM-DD) 轉成簡短顯示格式，例如：9/7（沒有設定日期就回傳空字串）
+    function formatShortDate(dateStr) {
+      if (!dateStr) return '';
+      const [y, m, d] = String(dateStr).split('-');
+      if (!m || !d) return '';
+      return `${parseInt(m, 10)}/${parseInt(d, 10)}`;
     }
 
     async function ensureCurrentGroup() {
@@ -646,11 +670,11 @@
       await fetchHistoryMenus();
     }
 
-    // 修改處：先依單號排序 (不分單、第1單、第2單...)，再依訂購人姓名排序
+    // 修改處：先依單號排序 (不分單排最前面，接著第1單、第2單...)，再依訂購人姓名排序
     function sortOrders(arr) {
       arr.sort((a, b) => {
-        let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : 999;
-        let sgB = (b.sub_group !== null && b.sub_group !== undefined && b.sub_group > 0) ? b.sub_group : 999;
+        let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : -1;
+        let sgB = (b.sub_group !== null && b.sub_group !== undefined && b.sub_group > 0) ? b.sub_group : -1;
         if (sgA !== sgB) return sgA - sgB;
         return String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-Hant', { numeric: true, sensitivity: 'base' });
       });
@@ -1608,6 +1632,8 @@
       if (error) {
         console.error('儲存外送資訊失敗:', error);
       }
+      // 外送日期若有變動，同步更新頂部「團購N」下拉選單上顯示的日期
+      updateRoomSelectLabels();
     }
 
     function getCategoryMap() {
@@ -1699,8 +1725,8 @@
         });
 
         const sortedSGs = Object.keys(subGroups).sort((a, b) => {
-          if (a === '不分單') return 1;
-          if (b === '不分單') return -1;
+          if (a === '不分單') return -1;
+          if (b === '不分單') return 1;
           return a.localeCompare(b, 'zh-Hant', { numeric: true });
         });
 
@@ -1756,8 +1782,8 @@
       });
 
       const sortedSGs = Object.keys(subGroups).sort((a, b) => {
-        if (a === '不分單') return 1;
-        if (b === '不分單') return -1;
+        if (a === '不分單') return -1;
+        if (b === '不分單') return 1;
         return a.localeCompare(b, 'zh-Hant', { numeric: true });
       });
 
