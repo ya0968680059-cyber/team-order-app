@@ -283,7 +283,8 @@
 
     <!-- 列印專用 A4 排版 -->
     <div class="print-only">
-      <h1 class="text-2xl font-bold mb-4 text-center" id="print-title">團購現場發餐對帳劃單表</h1>
+      <h1 class="text-2xl font-bold mb-2 text-center" id="print-title">團購現場發餐對帳劃單表</h1>
+      <p class="text-center font-bold text-sm mb-4" id="print-summary-line"></p>
       <table class="w-full border-collapse border border-black text-left text-sm">
         <thead>
           <tr id="print-table-header" class="bg-slate-100">
@@ -2246,6 +2247,9 @@
           };
         });
         const worksheet = XLSX.utils.json_to_sheet(rows);
+        const { totalAmount, mealCount, drinkCount } = computeSummary();
+        const summaryLine = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
+        XLSX.utils.sheet_add_aoa(worksheet, [[], [summaryLine]], { origin: -1 });
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "按個人對帳");
         XLSX.writeFile(workbook, `團購訂單_按個人對帳_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -2265,6 +2269,9 @@
           '訂購名單與數量': itemGroups[k].join(', ')
         }));
         const worksheet = XLSX.utils.json_to_sheet(rows);
+        const { totalAmount, mealCount, drinkCount } = computeSummary();
+        const summaryLine = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
+        XLSX.utils.sheet_add_aoa(worksheet, [[], [summaryLine]], { origin: -1 });
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "按餐點發放");
         XLSX.writeFile(workbook, `團購訂單_按餐點發放_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -2273,8 +2280,12 @@
 
     function renderPrintTable() {
       const titleEle = document.getElementById('print-title');
+      const summaryEle = document.getElementById('print-summary-line');
       const headerEle = document.getElementById('print-table-header');
       const tbody = document.getElementById('print-table-body');
+
+      const { totalAmount, mealCount, drinkCount } = computeSummary();
+      summaryEle.innerText = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
 
       if (viewMode === 'person') {
         titleEle.innerText = '團購現場發餐對帳劃單表（按個人對帳）';
