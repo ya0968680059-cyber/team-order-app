@@ -14,6 +14,7 @@
     @media print {
       .no-print { display: none !important; }
       .print-only { display: block !important; }
+      .print-hidden { display: none !important; }
       body { background: white; color: black; padding: 0; }
     }
     .print-only { display: none; }
@@ -272,7 +273,8 @@
           </div>
           <div class="flex gap-2">
             <button onclick="exportExcel()" class="bg-slate-700 hover:bg-slate-800 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition">📥 匯出 Excel</button>
-            <button onclick="window.print()" class="bg-slate-700 hover:bg-slate-800 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition">🖨️ 列印劃單</button>
+            <button onclick="printCurrentView()" class="bg-slate-700 hover:bg-slate-800 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition">🖨️ 列印劃單</button>
+            <button onclick="printMergedView()" class="bg-indigo-700 hover:bg-indigo-800 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition">🖨️📑 合併列印</button>
           </div>
         </div>
 
@@ -281,17 +283,27 @@
       </div>
     </section>
 
-    <!-- 列印專用 A4 排版 -->
-    <div class="print-only">
-      <h1 class="text-2xl font-bold mb-2 text-center" id="print-title">團購現場發餐對帳劃單表</h1>
-      <p class="text-center font-bold text-sm mb-4" id="print-summary-line"></p>
+    <!-- 列印專用 A4 排版：按個人對帳 -->
+    <div class="print-only" id="print-block-person">
+      <h1 class="text-2xl font-bold mb-2 text-center" id="print-title-person">團購現場發餐對帳劃單表（按個人對帳）</h1>
+      <p class="text-center font-bold text-sm mb-4" id="print-summary-line-person"></p>
       <table class="w-full border-collapse border border-black text-left text-sm">
         <thead>
-          <tr id="print-table-header" class="bg-slate-100">
-            <!-- 動態根據檢視模式切換表頭 -->
-          </tr>
+          <tr id="print-table-header-person" class="bg-slate-100"></tr>
         </thead>
-        <tbody id="print-table-body"></tbody>
+        <tbody id="print-table-body-person"></tbody>
+      </table>
+    </div>
+
+    <!-- 列印專用 A4 排版：按餐點發放（合併列印時會另起一頁） -->
+    <div class="print-only" id="print-block-item" style="page-break-before: always;">
+      <h1 class="text-2xl font-bold mb-2 text-center" id="print-title-item">團購餐點發放清單（按餐點發放）</h1>
+      <p class="text-center font-bold text-sm mb-4" id="print-summary-line-item"></p>
+      <table class="w-full border-collapse border border-black text-left text-sm">
+        <thead>
+          <tr id="print-table-header-item" class="bg-slate-100"></tr>
+        </thead>
+        <tbody id="print-table-body-item"></tbody>
       </table>
     </div>
 
@@ -688,7 +700,7 @@
       sortOrders(allOrders);
       renderOrdersSection();
       renderSummarySection();
-      renderPrintTable();
+      renderPrintTables();
     }
 
     async function sortOrdersBySubGroup() {
@@ -706,7 +718,7 @@
 
         renderOrdersSection();
         renderSummarySection();
-        renderPrintTable();
+        renderPrintTables();
 
         await showCustomAlert('🔄 已完成更新並依單號與姓名重新排序！');
       } finally {
@@ -1742,20 +1754,20 @@
       });
     }
 
-    // 依「分單」將某個餐點的訂購名單分組，避免不同單混在一起
-    // 回傳格式：{ 0: [{name, qty}], 1: [{name, qty}], ... }，key 為 sub_group（0 = 不分單）
-    function buildItemGroupsBySubGroup(orders) {
-      const itemGroups = {};
+    // 依「分單」分組，組内再依餐點分組：{ sg: { itemKey: [{name, qty}] } }
+    // 第1層排序＝分單（不分單→第1單→第2單…），第2層排序＝餐點（依菜單順序）
+    function groupOrdersBySubGroupThenItem(orders) {
+      const bySubGroup = {};
       orders.forEach(o => {
         const sg = (o.sub_group && o.sub_group > 0) ? o.sub_group : 0;
+        if (!bySubGroup[sg]) bySubGroup[sg] = {};
         (o.items || []).forEach(i => {
           const key = i.note ? `${i.name} (${i.note})` : i.name;
-          if (!itemGroups[key]) itemGroups[key] = {};
-          if (!itemGroups[key][sg]) itemGroups[key][sg] = [];
-          itemGroups[key][sg].push({ name: o.user_name, qty: i.qty });
+          if (!bySubGroup[sg][key]) bySubGroup[sg][key] = [];
+          bySubGroup[sg][key].push({ name: o.user_name, qty: i.qty });
         });
       });
-      return itemGroups;
+      return bySubGroup;
     }
 
     function subGroupLabel(sg) {
@@ -1951,7 +1963,7 @@
       document.getElementById('btn-view-person').className = mode === 'person' ? 'bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition text-xs' : 'text-slate-600 font-semibold px-3 py-1 rounded-md transition text-xs';
       document.getElementById('btn-view-item').className = mode === 'item' ? 'bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition text-xs' : 'text-slate-600 font-semibold px-3 py-1 rounded-md transition text-xs';
       renderOrdersSection();
-      renderPrintTable();
+      renderPrintTables();
     }
 
     async function updateSubGroup(orderId, val) {
@@ -2026,25 +2038,33 @@
           `;
         }).join('');
       } else {
-        const itemGroups = buildItemGroupsBySubGroup(filtered);
-        const sortedKeys = sortKeysByMenuOrder(Object.keys(itemGroups));
+        // 第1層：依分單（不分單／第1單／第2單…）；第2層：依餐點菜單順序
+        const bySubGroup = groupOrdersBySubGroupThenItem(filtered);
+        const sgKeys = sortedSubGroupKeys(bySubGroup);
 
-        container.innerHTML = sortedKeys.map(k => {
-          const subGroupsObj = itemGroups[k];
-          const sgKeys = sortedSubGroupKeys(subGroupsObj);
-          const totalQty = sgKeys.reduce((acc, sg) => acc + subGroupsObj[sg].reduce((a, c) => a + c.qty, 0), 0);
-          const groupsHtml = sgKeys.map(sg => `
-            <div class="mb-2 last:mb-0 pb-2 last:pb-0 border-b last:border-b-0 border-dashed border-slate-200">
-              <div class="text-[11px] font-bold text-slate-500 mb-1">📦 ${subGroupLabel(sg)}</div>
-              <div class="flex flex-wrap gap-2">
-                ${subGroupsObj[sg].map(u => `<span class="bg-white border px-2 py-1 rounded-md font-medium shadow-sm">${escapeHtml(u.name)} x ${u.qty}</span>`).join('')}
+        container.innerHTML = sgKeys.map(sg => {
+          const itemGroupsInSg = bySubGroup[sg];
+          const sortedItemKeys = sortKeysByMenuOrder(Object.keys(itemGroupsInSg));
+          const itemsHtml = sortedItemKeys.map(k => {
+            const entries = itemGroupsInSg[k];
+            const totalQty = entries.reduce((acc, c) => acc + c.qty, 0);
+            return `
+              <div class="p-3 border border-slate-200 rounded-lg bg-white text-sm">
+                <div class="font-bold text-blue-700 border-b pb-1.5">${k} <span class="text-xs text-slate-500 font-normal">(共 ${totalQty} 份)</span></div>
+                <div class="text-xs text-slate-700 mt-2 flex flex-wrap gap-2">
+                  ${entries.map(u => `<span class="bg-slate-50 border px-2 py-1 rounded-md font-medium shadow-sm">${escapeHtml(u.name)} x ${u.qty}</span>`).join('')}
+                </div>
               </div>
-            </div>
-          `).join('');
+            `;
+          }).join('');
           return `
-            <div class="p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm">
-              <div class="font-bold text-blue-700 border-b pb-1.5">${k} <span class="text-xs text-slate-500 font-normal">(共 ${totalQty} 份)</span></div>
-              <div class="text-xs text-slate-700 mt-2">${groupsHtml}</div>
+            <div class="mb-4 last:mb-0">
+              <div class="mb-2">
+                <span class="bg-blue-600 text-white text-xs font-bold px-2.5 py-1 rounded-md">📦 ${subGroupLabel(sg)}</span>
+              </div>
+              <div class="space-y-2 pl-2 border-l-4 border-blue-100">
+                ${itemsHtml}
+              </div>
             </div>
           `;
         }).join('') || '<p class="text-slate-400 text-sm text-center py-4">目前沒有符合條件的訂單</p>';
@@ -2331,25 +2351,26 @@
         XLSX.utils.book_append_sheet(workbook, worksheet, "按個人對帳");
         XLSX.writeFile(workbook, `團購訂單_按個人對帳_${new Date().toISOString().slice(0,10)}.xlsx`);
       } else {
-        const itemGroups = buildItemGroupsBySubGroup(allOrders);
-        const sortedKeys = sortKeysByMenuOrder(Object.keys(itemGroups));
-        const rows = sortedKeys.map(k => {
-          const subGroupsObj = itemGroups[k];
-          const sgKeys = sortedSubGroupKeys(subGroupsObj);
-          const totalPeople = sgKeys.reduce((acc, sg) => acc + subGroupsObj[sg].length, 0);
-          // 依分單分組，不同單分行呈現，不會混在一起
-          const detailText = sgKeys.map(sg =>
-            `【${subGroupLabel(sg)}】${subGroupsObj[sg].map(u => `${u.name} x${u.qty}`).join(', ')}`
-          ).join('\n');
-          return {
-            '餐點/品項': k,
-            '總訂購人數': totalPeople,
-            '訂購名單與數量（依分單分組）': detailText
-          };
+        // 第1層：依分單（不分單／第1單／第2單…）；第2層：依餐點菜單順序
+        const bySubGroup = groupOrdersBySubGroupThenItem(allOrders);
+        const sgKeys = sortedSubGroupKeys(bySubGroup);
+        const rows = [];
+        sgKeys.forEach(sg => {
+          const itemGroupsInSg = bySubGroup[sg];
+          const sortedItemKeys = sortKeysByMenuOrder(Object.keys(itemGroupsInSg));
+          sortedItemKeys.forEach(k => {
+            const entries = itemGroupsInSg[k];
+            rows.push({
+              '分單': subGroupLabel(sg),
+              '餐點/品項': k,
+              '總訂購人數': entries.length,
+              '訂購名單與數量': entries.map(u => `${u.name} x${u.qty}`).join('\n')
+            });
+          });
         });
         const worksheet = XLSX.utils.json_to_sheet(rows);
-        worksheet['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 50 }];
-        applyWrapTextToColumn(worksheet, 2, rows.length); // 訂購名單與數量欄位換行
+        worksheet['!cols'] = [{ wch: 10 }, { wch: 24 }, { wch: 12 }, { wch: 40 }];
+        applyWrapTextToColumn(worksheet, 3, rows.length); // 訂購名單與數量欄位換行
         const { totalAmount, mealCount, drinkCount } = computeSummary();
         const summaryLine = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
         XLSX.utils.sheet_add_aoa(worksheet, [[], [summaryLine]], { origin: -1 });
@@ -2359,70 +2380,111 @@
       }
     }
 
-    function renderPrintTable() {
-      const titleEle = document.getElementById('print-title');
-      const summaryEle = document.getElementById('print-summary-line');
-      const headerEle = document.getElementById('print-table-header');
-      const tbody = document.getElementById('print-table-body');
+    // 按個人對帳｜列印表格
+    function renderPrintTablePerson() {
+      const titleEle = document.getElementById('print-title-person');
+      const summaryEle = document.getElementById('print-summary-line-person');
+      const headerEle = document.getElementById('print-table-header-person');
+      const tbody = document.getElementById('print-table-body-person');
 
       const { totalAmount, mealCount, drinkCount } = computeSummary();
       summaryEle.innerText = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
+      titleEle.innerText = '團購現場發餐對帳劃單表（按個人對帳）';
+      headerEle.innerHTML = `
+        <th class="border border-black p-2 text-center w-12">核對</th>
+        <th class="border border-black p-2 w-20 text-center">分單</th>
+        <th class="border border-black p-2 w-28">姓名</th>
+        <th class="border border-black p-2">訂購明細與規格</th>
+        <th class="border border-black p-2 text-right w-24">應付金額</th>
+        <th class="border border-black p-2 text-center w-28">付款/找零狀態</th>
+      `;
+      tbody.innerHTML = allOrders.map(o => {
+        const changeVal = localStorage.getItem(`order_change_${o.id}`);
+        const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
+        const statusText = o.is_paid ? (changeNum > 0 ? `已付 (找$${changeVal})` : '已付') : '未付';
+        const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}單` : '-';
+        return `
+          <tr>
+            <td class="border border-black p-2 text-center">☐</td>
+            <td class="border border-black p-2 text-center font-bold">${sgText}</td>
+            <td class="border border-black p-2 font-bold">${escapeHtml(o.user_name)}</td>
+            <td class="border border-black p-2">${mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('<br>')}</td>
+            <td class="border border-black p-2 text-right font-bold">$${o.total_price}</td>
+            <td class="border border-black p-2 text-center font-medium">${statusText}</td>
+          </tr>
+        `;
+      }).join('');
+    }
 
-      if (viewMode === 'person') {
-        titleEle.innerText = '團購現場發餐對帳劃單表（按個人對帳）';
-        headerEle.innerHTML = `
-          <th class="border border-black p-2 text-center w-12">核對</th>
-          <th class="border border-black p-2 w-20 text-center">分單</th>
-          <th class="border border-black p-2 w-28">姓名</th>
-          <th class="border border-black p-2">訂購明細與規格</th>
-          <th class="border border-black p-2 text-right w-24">應付金額</th>
-          <th class="border border-black p-2 text-center w-28">付款/找零狀態</th>
+    // 按餐點發放｜列印表格：第1層＝分單，第2層＝餐點（依菜單順序）
+    function renderPrintTableItem() {
+      const titleEle = document.getElementById('print-title-item');
+      const summaryEle = document.getElementById('print-summary-line-item');
+      const headerEle = document.getElementById('print-table-header-item');
+      const tbody = document.getElementById('print-table-body-item');
+
+      const { totalAmount, mealCount, drinkCount } = computeSummary();
+      summaryEle.innerText = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
+      titleEle.innerText = '團購餐點發放清單（按餐點發放）';
+      headerEle.innerHTML = `
+        <th class="border border-black p-2 text-center w-12">点收</th>
+        <th class="border border-black p-2 w-64">餐點品項與規格</th>
+        <th class="border border-black p-2 text-center w-20">總份數</th>
+        <th class="border border-black p-2">各訂購人與數量</th>
+      `;
+
+      const bySubGroup = groupOrdersBySubGroupThenItem(allOrders);
+      const sgKeys = sortedSubGroupKeys(bySubGroup);
+      tbody.innerHTML = sgKeys.map(sg => {
+        const itemGroupsInSg = bySubGroup[sg];
+        const sortedItemKeys = sortKeysByMenuOrder(Object.keys(itemGroupsInSg));
+        const sgHeaderRow = `
+          <tr>
+            <td colspan="4" class="border border-black p-2 bg-slate-200 font-bold">📦 ${subGroupLabel(sg)}</td>
+          </tr>
         `;
-        tbody.innerHTML = allOrders.map(o => {
-          const changeVal = localStorage.getItem(`order_change_${o.id}`);
-          const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
-          const statusText = o.is_paid ? (changeNum > 0 ? `已付 (找$${changeVal})` : '已付') : '未付';
-          const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}單` : '-';
-          return `
-            <tr>
-              <td class="border border-black p-2 text-center">☐</td>
-              <td class="border border-black p-2 text-center font-bold">${sgText}</td>
-              <td class="border border-black p-2 font-bold">${escapeHtml(o.user_name)}</td>
-              <td class="border border-black p-2">${mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('<br>')}</td>
-              <td class="border border-black p-2 text-right font-bold">$${o.total_price}</td>
-              <td class="border border-black p-2 text-center font-medium">${statusText}</td>
-            </tr>
-          `;
-        }).join('');
-      } else {
-        titleEle.innerText = '團購餐點發放清單（按餐點發放）';
-        headerEle.innerHTML = `
-          <th class="border border-black p-2 text-center w-12">点收</th>
-          <th class="border border-black p-2 w-64">餐點品項與規格</th>
-          <th class="border border-black p-2 text-center w-20">總份數</th>
-          <th class="border border-black p-2">各訂購人與數量（依分單分組）</th>
-        `;
-        const itemGroups = buildItemGroupsBySubGroup(allOrders);
-        const sortedKeys = sortKeysByMenuOrder(Object.keys(itemGroups));
-        tbody.innerHTML = sortedKeys.map(k => {
-          const subGroupsObj = itemGroups[k];
-          const sgKeys = sortedSubGroupKeys(subGroupsObj);
-          const totalPeople = sgKeys.reduce((acc, sg) => acc + subGroupsObj[sg].length, 0);
-          const detailHtml = sgKeys.map(sg => `
-            <div class="mb-1 last:mb-0">
-              <span class="font-bold">📦 ${subGroupLabel(sg)}：</span>${subGroupsObj[sg].map(u => `${escapeHtml(u.name)} x${u.qty}`).join(', ')}
-            </div>
-          `).join('');
+        const itemRows = sortedItemKeys.map(k => {
+          const entries = itemGroupsInSg[k];
           return `
             <tr>
               <td class="border border-black p-2 text-center">☐</td>
               <td class="border border-black p-2 font-bold">${escapeHtml(k)}</td>
-              <td class="border border-black p-2 text-center font-bold">${totalPeople}</td>
-              <td class="border border-black p-2">${detailHtml}</td>
+              <td class="border border-black p-2 text-center font-bold">${entries.length}</td>
+              <td class="border border-black p-2">${entries.map(u => `${escapeHtml(u.name)} x${u.qty}`).join(', ')}</td>
             </tr>
           `;
         }).join('');
+        return sgHeaderRow + itemRows;
+      }).join('');
+    }
+
+    // 同時更新兩份列印表格內容（讓資料異動時，兩份都保持最新，不用等點列印才產生）
+    function renderPrintTables() {
+      renderPrintTablePerson();
+      renderPrintTableItem();
+    }
+
+    // 只列印目前畫面所在的檢視模式（按個人對帳 或 按餐點發放）
+    function printCurrentView() {
+      renderPrintTables();
+      const personBlock = document.getElementById('print-block-person');
+      const itemBlock = document.getElementById('print-block-item');
+      if (viewMode === 'person') {
+        personBlock.classList.remove('print-hidden');
+        itemBlock.classList.add('print-hidden');
+      } else {
+        itemBlock.classList.remove('print-hidden');
+        personBlock.classList.add('print-hidden');
       }
+      window.print();
+    }
+
+    // 合併列印：一次把「按個人對帳」與「按餐點發放」兩份都印出來
+    function printMergedView() {
+      renderPrintTables();
+      document.getElementById('print-block-person').classList.remove('print-hidden');
+      document.getElementById('print-block-item').classList.remove('print-hidden');
+      window.print();
     }
 
     init();
