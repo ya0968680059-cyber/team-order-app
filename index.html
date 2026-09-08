@@ -1129,8 +1129,38 @@
         await showCustomAlert('請先輸入訂購人姓名！');
         return;
       }
+
+      const existingOrderForCancel = allOrders.find(o => o.user_name === name);
+
+      // 購物車是空的：如果本來就沒有訂單，提示錯誤；如果本來有訂單，代表使用者是把品項全部移除後想取消整筆訂單
       if (userCart.length === 0) {
-        await showCustomAlert('購物車是空的！');
+        if (!existingOrderForCancel) {
+          await showCustomAlert('購物車是空的！');
+          return;
+        }
+
+        const confirmCancel = await showCustomConfirm(`您已將購物車內的品項全部移除。\n是否要取消 ${name} 先前送出的整筆訂單？`);
+        if (!confirmCancel) return;
+
+        const submitBtn = document.getElementById('submit-order-btn');
+        submitBtn.disabled = true;
+        submitBtn.innerText = '⏳ 訂單取消中...';
+
+        try {
+          const { error: cancelError } = await sb.from('orders').delete().eq('id', existingOrderForCancel.id);
+          if (cancelError) {
+            await showCustomAlert(`❌ 取消訂單失敗：${cancelError.message}`);
+          } else {
+            await showCustomAlert(`✅ 已取消 ${name} 的訂單！`);
+            await fetchOrders();
+          }
+        } catch (err) {
+          console.error('取消訂單發生例外:', err);
+          await showCustomAlert('❌ 取消失敗，請稍後再試！');
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.innerText = '🚀 確認送出訂單';
+        }
         return;
       }
 
@@ -1941,7 +1971,7 @@
           const sortedItems = mergeCartItems(o.items || []);
           const changeVal = localStorage.getItem(`order_change_${o.id}`);
           const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
-          const changeBadge = (o.is_paid && changeNum > 0) ? `<span class="bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[11px] font-bold">找$${changeVal}</span>` : '';
+          const changeBadge = (o.is_paid && changeNum > 0) ? `<button type="button" onclick="clearChange('${o.id}')" title="找錢完成後點我，這個提示就會消失" class="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer">找$${changeVal} ✕</button>` : '';
           const currentSg = (o.sub_group !== null && o.sub_group !== undefined) ? o.sub_group : 0;
 
           return `
@@ -2042,6 +2072,13 @@
       }
       
       await fetchOrders();
+    }
+
+    function clearChange(id) {
+      // 找錢完成後，只移除「待找零」的提示標記，不改變已付款/未付款狀態，不需要重新整理整頁
+      localStorage.removeItem(`order_change_${id}`);
+      localStorage.removeItem(`order_received_${id}`);
+      renderOrdersSection();
     }
 
     async function deleteOrder(id) {
