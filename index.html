@@ -1742,6 +1742,30 @@
       });
     }
 
+    // 依「分單」將某個餐點的訂購名單分組，避免不同單混在一起
+    // 回傳格式：{ 0: [{name, qty}], 1: [{name, qty}], ... }，key 為 sub_group（0 = 不分單）
+    function buildItemGroupsBySubGroup(orders) {
+      const itemGroups = {};
+      orders.forEach(o => {
+        const sg = (o.sub_group && o.sub_group > 0) ? o.sub_group : 0;
+        (o.items || []).forEach(i => {
+          const key = i.note ? `${i.name} (${i.note})` : i.name;
+          if (!itemGroups[key]) itemGroups[key] = {};
+          if (!itemGroups[key][sg]) itemGroups[key][sg] = [];
+          itemGroups[key][sg].push({ name: o.user_name, qty: i.qty });
+        });
+      });
+      return itemGroups;
+    }
+
+    function subGroupLabel(sg) {
+      return sg > 0 ? `第${sg}單` : '不分單';
+    }
+
+    function sortedSubGroupKeys(subGroupsObj) {
+      return Object.keys(subGroupsObj).map(Number).sort((a, b) => a - b);
+    }
+
     function switchReportViewMode(mode) {
       reportViewMode = mode;
       document.getElementById('btn-report-total').className = mode === 'total' ? 'bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition text-xs' : 'text-slate-600 font-semibold px-3 py-1 rounded-md transition text-xs';
@@ -1975,7 +1999,7 @@
           const currentSg = (o.sub_group !== null && o.sub_group !== undefined) ? o.sub_group : 0;
 
           return `
-            <div class="flex flex-wrap justify-between items-center p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
+            <div class="flex flex-wrap justify-between items-start p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
               <div class="flex items-center gap-2">
                 <select onchange="updateSubGroup('${o.id}', this.value)" class="border border-slate-300 text-xs p-1 rounded bg-white font-bold text-blue-700 outline-none">
                   <option value="0" ${currentSg===0?'selected':''}>不分單</option>
@@ -1993,7 +2017,7 @@
                 <span class="text-slate-500 font-extrabold">($${o.total_price})</span>
                 ${changeBadge}
               </div>
-              <div class="text-xs text-slate-600 flex-1 px-2">${sortedItems.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</div>
+              <div class="text-xs text-slate-600 flex-1 px-2 leading-relaxed">${sortedItems.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('<br>')}</div>
               <div class="flex gap-1.5">
                 <button type="button" onclick="openEditModal('${o.id}')" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded-md text-xs font-bold transition cursor-pointer">✏️ 修改</button>
                 <button type="button" onclick="deleteOrder('${o.id}')" class="bg-rose-100 hover:bg-rose-200 text-rose-700 px-2.5 py-1 rounded-md text-xs font-bold transition cursor-pointer">🗑️ 刪除</button>
@@ -2002,26 +2026,28 @@
           `;
         }).join('');
       } else {
-        const itemGroups = {};
-        filtered.forEach(o => {
-          o.items.forEach(i => {
-            const key = i.note ? `${i.name} (${i.note})` : i.name;
-            if (!itemGroups[key]) itemGroups[key] = [];
-            const sgText = (o.sub_group && o.sub_group > 0) ? `[第${o.sub_group}單]` : '';
-            itemGroups[key].push({ name: `${o.user_name} ${sgText}`, qty: i.qty });
-          });
-        });
-
+        const itemGroups = buildItemGroupsBySubGroup(filtered);
         const sortedKeys = sortKeysByMenuOrder(Object.keys(itemGroups));
 
-        container.innerHTML = sortedKeys.map(k => `
-          <div class="p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm">
-            <div class="font-bold text-blue-700 border-b pb-1.5">${k} <span class="text-xs text-slate-500 font-normal">(共 ${itemGroups[k].reduce((acc, cur) => acc + cur.qty, 0)} 份)</span></div>
-            <div class="text-xs text-slate-700 mt-2 flex flex-wrap gap-2">
-              ${itemGroups[k].map(u => `<span class="bg-white border px-2 py-1 rounded-md font-medium shadow-sm">${u.name} x ${u.qty}</span>`).join('')}
+        container.innerHTML = sortedKeys.map(k => {
+          const subGroupsObj = itemGroups[k];
+          const sgKeys = sortedSubGroupKeys(subGroupsObj);
+          const totalQty = sgKeys.reduce((acc, sg) => acc + subGroupsObj[sg].reduce((a, c) => a + c.qty, 0), 0);
+          const groupsHtml = sgKeys.map(sg => `
+            <div class="mb-2 last:mb-0 pb-2 last:pb-0 border-b last:border-b-0 border-dashed border-slate-200">
+              <div class="text-[11px] font-bold text-slate-500 mb-1">📦 ${subGroupLabel(sg)}</div>
+              <div class="flex flex-wrap gap-2">
+                ${subGroupsObj[sg].map(u => `<span class="bg-white border px-2 py-1 rounded-md font-medium shadow-sm">${escapeHtml(u.name)} x ${u.qty}</span>`).join('')}
+              </div>
             </div>
-          </div>
-        `).join('') || '<p class="text-slate-400 text-sm text-center py-4">目前沒有符合條件的訂單</p>';
+          `).join('');
+          return `
+            <div class="p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm">
+              <div class="font-bold text-blue-700 border-b pb-1.5">${k} <span class="text-xs text-slate-500 font-normal">(共 ${totalQty} 份)</span></div>
+              <div class="text-xs text-slate-700 mt-2">${groupsHtml}</div>
+            </div>
+          `;
+        }).join('') || '<p class="text-slate-400 text-sm text-center py-4">目前沒有符合條件的訂單</p>';
       }
     }
 
@@ -2267,6 +2293,17 @@
       await fetchOrders();
     }
 
+    // 對指定欄位（0-based 欄位索引）套用自動換行樣式，讓 Excel 儲存格內的換行可以正常顯示
+    function applyWrapTextToColumn(worksheet, colIndex, dataRowCount) {
+      for (let r = 1; r <= dataRowCount; r++) {
+        const cellRef = XLSX.utils.encode_cell({ r, c: colIndex });
+        const cell = worksheet[cellRef];
+        if (cell) {
+          cell.s = { alignment: { wrapText: true, vertical: 'top', horizontal: 'left' } };
+        }
+      }
+    }
+
     function exportExcel() {
       if (viewMode === 'person') {
         const rows = allOrders.map(o => {
@@ -2277,13 +2314,16 @@
           return {
             '分單': sgText,
             '姓名': o.user_name,
-            '訂購明細': mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('; '),
+            // 同一人點多樣品項時，改用換行分隔（而非逗號），比較不容易看漏
+            '訂購明細': mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('\n'),
             '總金額': o.total_price,
             '付款狀態': paymentStatusText,
             '核對簽名欄': ''
           };
         });
         const worksheet = XLSX.utils.json_to_sheet(rows);
+        worksheet['!cols'] = [{ wch: 10 }, { wch: 12 }, { wch: 36 }, { wch: 10 }, { wch: 18 }, { wch: 12 }];
+        applyWrapTextToColumn(worksheet, 2, rows.length); // 訂購明細欄位換行
         const { totalAmount, mealCount, drinkCount } = computeSummary();
         const summaryLine = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
         XLSX.utils.sheet_add_aoa(worksheet, [[], [summaryLine]], { origin: -1 });
@@ -2291,21 +2331,25 @@
         XLSX.utils.book_append_sheet(workbook, worksheet, "按個人對帳");
         XLSX.writeFile(workbook, `團購訂單_按個人對帳_${new Date().toISOString().slice(0,10)}.xlsx`);
       } else {
-        const itemGroups = {};
-        allOrders.forEach(o => {
-          o.items.forEach(i => {
-            const key = i.note ? `${i.name} (${i.note})` : i.name;
-            if (!itemGroups[key]) itemGroups[key] = [];
-            const sgText = (o.sub_group && o.sub_group > 0) ? `[第${o.sub_group}單]` : '';
-            itemGroups[key].push(`${o.user_name}${sgText} x${i.qty}`);
-          });
+        const itemGroups = buildItemGroupsBySubGroup(allOrders);
+        const sortedKeys = sortKeysByMenuOrder(Object.keys(itemGroups));
+        const rows = sortedKeys.map(k => {
+          const subGroupsObj = itemGroups[k];
+          const sgKeys = sortedSubGroupKeys(subGroupsObj);
+          const totalPeople = sgKeys.reduce((acc, sg) => acc + subGroupsObj[sg].length, 0);
+          // 依分單分組，不同單分行呈現，不會混在一起
+          const detailText = sgKeys.map(sg =>
+            `【${subGroupLabel(sg)}】${subGroupsObj[sg].map(u => `${u.name} x${u.qty}`).join(', ')}`
+          ).join('\n');
+          return {
+            '餐點/品項': k,
+            '總訂購人數': totalPeople,
+            '訂購名單與數量（依分單分組）': detailText
+          };
         });
-        const rows = Object.keys(itemGroups).map(k => ({
-          '餐點/品項': k,
-          '總訂購人數': itemGroups[k].length,
-          '訂購名單與數量': itemGroups[k].join(', ')
-        }));
         const worksheet = XLSX.utils.json_to_sheet(rows);
+        worksheet['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 50 }];
+        applyWrapTextToColumn(worksheet, 2, rows.length); // 訂購名單與數量欄位換行
         const { totalAmount, mealCount, drinkCount } = computeSummary();
         const summaryLine = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
         XLSX.utils.sheet_add_aoa(worksheet, [[], [summaryLine]], { origin: -1 });
@@ -2344,7 +2388,7 @@
               <td class="border border-black p-2 text-center">☐</td>
               <td class="border border-black p-2 text-center font-bold">${sgText}</td>
               <td class="border border-black p-2 font-bold">${escapeHtml(o.user_name)}</td>
-              <td class="border border-black p-2">${mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join(', ')}</td>
+              <td class="border border-black p-2">${mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('<br>')}</td>
               <td class="border border-black p-2 text-right font-bold">$${o.total_price}</td>
               <td class="border border-black p-2 text-center font-medium">${statusText}</td>
             </tr>
@@ -2356,26 +2400,28 @@
           <th class="border border-black p-2 text-center w-12">点收</th>
           <th class="border border-black p-2 w-64">餐點品項與規格</th>
           <th class="border border-black p-2 text-center w-20">總份數</th>
-          <th class="border border-black p-2">各訂購人與數量</th>
+          <th class="border border-black p-2">各訂購人與數量（依分單分組）</th>
         `;
-        const itemGroups = {};
-        allOrders.forEach(o => {
-          o.items.forEach(i => {
-            const key = i.note ? `${i.name} (${i.note})` : i.name;
-            if (!itemGroups[key]) itemGroups[key] = [];
-            const sgText = (o.sub_group && o.sub_group > 0) ? `[第${o.sub_group}單]` : '';
-            itemGroups[key].push(`${o.user_name}${sgText} x${i.qty}`);
-          });
-        });
+        const itemGroups = buildItemGroupsBySubGroup(allOrders);
         const sortedKeys = sortKeysByMenuOrder(Object.keys(itemGroups));
-        tbody.innerHTML = sortedKeys.map(k => `
-          <tr>
-            <td class="border border-black p-2 text-center">☐</td>
-            <td class="border border-black p-2 font-bold">${escapeHtml(k)}</td>
-            <td class="border border-black p-2 text-center font-bold">${itemGroups[k].length}</td>
-            <td class="border border-black p-2">${itemGroups[k].join(', ')}</td>
-          </tr>
-        `).join('');
+        tbody.innerHTML = sortedKeys.map(k => {
+          const subGroupsObj = itemGroups[k];
+          const sgKeys = sortedSubGroupKeys(subGroupsObj);
+          const totalPeople = sgKeys.reduce((acc, sg) => acc + subGroupsObj[sg].length, 0);
+          const detailHtml = sgKeys.map(sg => `
+            <div class="mb-1 last:mb-0">
+              <span class="font-bold">📦 ${subGroupLabel(sg)}：</span>${subGroupsObj[sg].map(u => `${escapeHtml(u.name)} x${u.qty}`).join(', ')}
+            </div>
+          `).join('');
+          return `
+            <tr>
+              <td class="border border-black p-2 text-center">☐</td>
+              <td class="border border-black p-2 font-bold">${escapeHtml(k)}</td>
+              <td class="border border-black p-2 text-center font-bold">${totalPeople}</td>
+              <td class="border border-black p-2">${detailHtml}</td>
+            </tr>
+          `;
+        }).join('');
       }
     }
 
