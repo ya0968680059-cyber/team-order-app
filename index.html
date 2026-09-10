@@ -524,6 +524,14 @@
       await fetchActiveMenu();
       await fetchOrders();
       updateRoomSelectLabels();
+
+      // 額外防護：每 15 秒自動向資料庫重新檢查一次團購開放狀態，
+      // 讓長時間停留在點餐頁面、沒有重新整理的使用者，也能儘快看到「已結單」的畫面提示，
+      // 不用等到按下送出才發現。
+      setInterval(async () => {
+        await fetchSettings();
+      }, 15000);
+
       document.addEventListener('click', (e) => {
         const historyWrap = document.getElementById('history-menu-search')?.parentElement;
         if (historyWrap && !historyWrap.contains(e.target)) {
@@ -636,6 +644,25 @@
         }
       }
       updateStatusUI();
+    }
+
+    // 送出訂單前的最終防線：直接向資料庫重新確認「這個瞬間」的團購狀態，
+    // 不依賴頁面上可能過期的 isOrderingOpen 快取值。
+    // 這樣即使使用者頁面開很久、後台中途已結單，只要她沒重新整理，
+    // 按下「確認送出訂單」時仍會被即時擋下，而不是誤判成功。
+    async function isOrderingOpenNow() {
+      try {
+        const { data, error } = await sb.from('settings').select('value').eq('key', roomKey('is_active')).maybeSingle();
+        if (error) throw error;
+        if (data && data.value !== null && data.value !== undefined) {
+          return data.value === 'true' || data.value === true;
+        }
+        return true; // 資料庫尚未設定過此欄位時，預設視為開放中
+      } catch (e) {
+        console.error('重新確認團購狀態失敗，改用目前已知狀態:', e);
+        // 查詢失敗（例如短暫斷線）時，退回使用目前快取狀態，避免因單純網路問題而卡住無法送單
+        return isOrderingOpen;
+      }
     }
 
     function updateStatusUI() {
@@ -1137,10 +1164,31 @@
     }
 
     async function submitOrder() {
+      // 先用目前頁面快取的狀態快速擋一次（沒網路延遲、體驗較快）
       if (!isOrderingOpen) {
-        await showCustomAlert('本次團購已結單！');
+        await showCustomAlert('⛔ 已截止送單！本次團購已結單。');
         return;
       }
+
+      // 再向資料庫重新確認一次「當下」的真實狀態，防止頁面沒重新整理、
+      // 後台其實已經結單，卻仍被舊快取誤判為可送單的競態情況（Bug 修正核心）
+      const submitBtnPreCheck = document.getElementById('submit-order-btn');
+      const originalBtnText = submitBtnPreCheck.innerText;
+      submitBtnPreCheck.disabled = true;
+      submitBtnPreCheck.innerText = '⏳ 確認團購狀態中...';
+
+      const stillOpen = await isOrderingOpenNow();
+
+      if (!stillOpen) {
+        isOrderingOpen = false;
+        updateStatusUI(); // 立即把畫面切換成「已結單」唯讀狀態，避免使用者繼續誤操作
+        await showCustomAlert('⛔ 已截止送單！本次團購已結單，無法再送出訂單。');
+        return;
+      }
+
+      submitBtnPreCheck.disabled = false;
+      submitBtnPreCheck.innerText = originalBtnText;
+
       const name = document.getElementById('user-name-input').value.trim();
       if (!name) {
         await showCustomAlert('請先輸入訂購人姓名！');
