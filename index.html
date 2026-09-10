@@ -238,6 +238,11 @@
                 <option value="3">第3單</option>
                 <option value="4">第4單</option>
                 <option value="5">第5單</option>
+                <option value="6">第6單</option>
+                <option value="7">第7單</option>
+                <option value="8">第8單</option>
+                <option value="9">第9單</option>
+                <option value="10">第10單</option>
               </select>
             </div>
             <!-- 更新訂單並重新排序按鈕 -->
@@ -2020,6 +2025,11 @@
                   <option value="3" ${currentSg===3?'selected':''}>第3單</option>
                   <option value="4" ${currentSg===4?'selected':''}>第4單</option>
                   <option value="5" ${currentSg===5?'selected':''}>第5單</option>
+                  <option value="6" ${currentSg===6?'selected':''}>第6單</option>
+                  <option value="7" ${currentSg===7?'selected':''}>第7單</option>
+                  <option value="8" ${currentSg===8?'selected':''}>第8單</option>
+                  <option value="9" ${currentSg===9?'selected':''}>第9單</option>
+                  <option value="10" ${currentSg===10?'selected':''}>第10單</option>
                 </select>
 
                 <button type="button" onclick="togglePaid('${o.id}')" class="${o.is_paid ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'} text-white px-2.5 py-1 rounded-md text-xs font-bold transition cursor-pointer">
@@ -2360,10 +2370,11 @@
           const sortedItemKeys = sortKeysByMenuOrder(Object.keys(itemGroupsInSg));
           sortedItemKeys.forEach(k => {
             const entries = itemGroupsInSg[k];
+            const totalQty = entries.reduce((acc, c) => acc + c.qty, 0);
             rows.push({
               '分單': subGroupLabel(sg),
               '餐點/品項': k,
-              '總訂購人數': entries.length,
+              '總份數': totalQty,
               '訂購名單與數量': entries.map(u => `${u.name} x${u.qty}`).join('\n')
             });
           });
@@ -2445,11 +2456,12 @@
         `;
         const itemRows = sortedItemKeys.map(k => {
           const entries = itemGroupsInSg[k];
+          const totalQty = entries.reduce((acc, c) => acc + c.qty, 0);
           return `
             <tr>
               <td class="border border-black p-2 text-center">☐</td>
               <td class="border border-black p-2 font-bold">${escapeHtml(k)}</td>
-              <td class="border border-black p-2 text-center font-bold">${entries.length}</td>
+              <td class="border border-black p-2 text-center font-bold">${totalQty}</td>
               <td class="border border-black p-2">${entries.map(u => `${escapeHtml(u.name)} x${u.qty}`).join(', ')}</td>
             </tr>
           `;
