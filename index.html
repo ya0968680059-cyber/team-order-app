@@ -1791,17 +1791,31 @@
 
     function getMenuOrderIndex(name) {
       const idx = currentMenuData.findIndex(m => m.name === name);
-      return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+      return idx;
+    }
+
+    // 取得某個「明細鍵值」在菜單中的排序索引。
+    // 1. 先嘗試用完整字串比對（涵蓋 Excel 品項名稱本身就帶括號規格的情況，例如「肉燥飯 (小)」「滷蛋 (1粒)」本身就是完整品名）。
+    // 2. 若比對不到，才假設格式為「品項 (客製化備註)」，拆開括號取品項本名再比對一次（涵蓋點餐時另外加註的情況，例如「白飯 (少冰)」）。
+    // 3. 兩者都比對不到才視為找不到，排到最後。
+    function getBestMenuOrderIndex(key) {
+      const exactIdx = getMenuOrderIndex(key);
+      if (exactIdx !== -1) return exactIdx;
+
+      const parenIdx = key.indexOf(' (');
+      if (parenIdx !== -1) {
+        const baseName = key.substring(0, parenIdx);
+        const baseIdx = getMenuOrderIndex(baseName);
+        if (baseIdx !== -1) return baseIdx;
+      }
+
+      return Number.MAX_SAFE_INTEGER;
     }
 
     function sortKeysByMenuOrder(keys) {
       return keys.sort((a, b) => {
-        const parenIdxA = a.indexOf(' (');
-        const parenIdxB = b.indexOf(' (');
-        const nameA = parenIdxA === -1 ? a : a.substring(0, parenIdxA);
-        const nameB = parenIdxB === -1 ? b : b.substring(0, parenIdxB);
-        const orderA = getMenuOrderIndex(nameA);
-        const orderB = getMenuOrderIndex(nameB);
+        const orderA = getBestMenuOrderIndex(a);
+        const orderB = getBestMenuOrderIndex(b);
         if (orderA !== orderB) return orderA - orderB;
         return a.localeCompare(b, 'zh-Hant');
       });
