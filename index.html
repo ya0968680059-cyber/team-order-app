@@ -1789,27 +1789,27 @@
       return map;
     }
 
-    function getMenuOrderIndex(name) {
-      const idx = currentMenuData.findIndex(m => m.name === name);
-      return idx;
-    }
-
     // 取得某個「明細鍵值」在菜單中的排序索引。
-    // 1. 先嘗試用完整字串比對（涵蓋 Excel 品項名稱本身就帶括號規格的情況，例如「肉燥飯 (小)」「滷蛋 (1粒)」本身就是完整品名）。
-    // 2. 若比對不到，才假設格式為「品項 (客製化備註)」，拆開括號取品項本名再比對一次（涵蓋點餐時另外加註的情況，例如「白飯 (少冰)」）。
-    // 3. 兩者都比對不到才視為找不到，排到最後。
+    // 明細鍵值的組成規則是：i.note ? `${i.name} (${i.note})` : i.name
+    // 麻煩的地方在於 i.name 本身（來自 Excel 品項欄）可能就已經帶括號規格，
+    // 例如「肉燥飯 (小)」「滷蛋 (1粒)」——這時如果使用者點餐時又額外加註備註（例如「加滷蛋」），
+    // 鍵值會變成兩層括號：「肉燥飯 (小) (加滷蛋)」。
+    // 因此不能用「砍掉第一個括號」這種位置猜測法（會誤砍成「肉燥飯」而比對不到），
+    // 而是要拿 currentMenuData 裡「每一個品項的完整名稱」去比對鍵值的開頭，
+    // 取「能完整比對上、且名稱最長（最精確）」的那一個品項，藉此正確剝除後面外加的備註層。
     function getBestMenuOrderIndex(key) {
-      const exactIdx = getMenuOrderIndex(key);
-      if (exactIdx !== -1) return exactIdx;
-
-      const parenIdx = key.indexOf(' (');
-      if (parenIdx !== -1) {
-        const baseName = key.substring(0, parenIdx);
-        const baseIdx = getMenuOrderIndex(baseName);
-        if (baseIdx !== -1) return baseIdx;
-      }
-
-      return Number.MAX_SAFE_INTEGER;
+      let bestIdx = -1;
+      let bestLen = -1;
+      currentMenuData.forEach((m, idx) => {
+        if (!m.name) return;
+        const isExact = key === m.name;
+        const isPrefix = key.startsWith(m.name + ' (');
+        if ((isExact || isPrefix) && m.name.length > bestLen) {
+          bestLen = m.name.length;
+          bestIdx = idx;
+        }
+      });
+      return bestIdx === -1 ? Number.MAX_SAFE_INTEGER : bestIdx;
     }
 
     function sortKeysByMenuOrder(keys) {
