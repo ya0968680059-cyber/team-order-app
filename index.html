@@ -232,17 +232,17 @@
             <div class="flex items-center gap-1.5 text-xs text-slate-700 font-semibold">
               <select id="filter-subgroup-select" onchange="renderOrdersSection()" class="border border-slate-300 p-1.5 rounded-lg text-xs bg-white outline-none">
                 <option value="all">全部</option>
-                <option value="0">不分單</option>
-                <option value="1">第1單</option>
-                <option value="2">第2單</option>
-                <option value="3">第3單</option>
-                <option value="4">第4單</option>
-                <option value="5">第5單</option>
-                <option value="6">第6單</option>
-                <option value="7">第7單</option>
-                <option value="8">第8單</option>
-                <option value="9">第9單</option>
-                <option value="10">第10單</option>
+                <option value="0">不分袋</option>
+                <option value="1">第1袋</option>
+                <option value="2">第2袋</option>
+                <option value="3">第3袋</option>
+                <option value="4">第4袋</option>
+                <option value="5">第5袋</option>
+                <option value="6">第6袋</option>
+                <option value="7">第7袋</option>
+                <option value="8">第8袋</option>
+                <option value="9">第9袋</option>
+                <option value="10">第10袋</option>
               </select>
             </div>
             <!-- 更新訂單並重新排序按鈕 -->
@@ -715,7 +715,7 @@
       await fetchHistoryMenus();
     }
 
-    // 修改處：先依單號排序 (不分單排最前面，接著第1單、第2單...)，再依訂購人姓名排序
+    // 修改處：先依單號排序 (不分袋排最前面，接著第1袋、第2袋...)，再依訂購人姓名排序
     function sortOrders(arr) {
       arr.sort((a, b) => {
         let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : -1;
@@ -1808,7 +1808,7 @@
     }
 
     // 依「分單」分組，組内再依餐點分組：{ sg: { itemKey: [{name, qty}] } }
-    // 第1層排序＝分單（不分單→第1單→第2單…），第2層排序＝餐點（依菜單順序）
+    // 第1層排序＝分單（不分袋→第1袋→第2袋…），第2層排序＝餐點（依菜單順序）
     function groupOrdersBySubGroupThenItem(orders) {
       const bySubGroup = {};
       orders.forEach(o => {
@@ -1824,7 +1824,7 @@
     }
 
     function subGroupLabel(sg) {
-      return sg > 0 ? `第${sg}單` : '不分單';
+      return sg > 0 ? `第${sg}單` : '不分袋';
     }
 
     function sortedSubGroupKeys(subGroupsObj) {
@@ -1890,14 +1890,14 @@
       } else {
         const subGroups = {};
         allOrders.forEach(o => {
-          const sg = (o.sub_group !== null && o.sub_group !== undefined && o.sub_group > 0) ? `第${o.sub_group}單` : '不分單';
+          const sg = (o.sub_group !== null && o.sub_group !== undefined && o.sub_group > 0) ? `第${o.sub_group}單` : '不分袋';
           if (!subGroups[sg]) subGroups[sg] = [];
           subGroups[sg].push(o);
         });
 
         const sortedSGs = Object.keys(subGroups).sort((a, b) => {
-          if (a === '不分單') return -1;
-          if (b === '不分單') return 1;
+          if (a === '不分袋') return -1;
+          if (b === '不分袋') return 1;
           return a.localeCompare(b, 'zh-Hant', { numeric: true });
         });
 
@@ -1947,14 +1947,14 @@
       const categoryMap = getCategoryMap();
 
       allOrders.forEach(o => {
-        const sg = (o.sub_group !== null && o.sub_group !== undefined && o.sub_group > 0) ? `第${o.sub_group}單` : '不分單';
+        const sg = (o.sub_group !== null && o.sub_group !== undefined && o.sub_group > 0) ? `第${o.sub_group}單` : '不分袋';
         if (!subGroups[sg]) subGroups[sg] = [];
         subGroups[sg].push(o);
       });
 
       const sortedSGs = Object.keys(subGroups).sort((a, b) => {
-        if (a === '不分單') return -1;
-        if (b === '不分單') return 1;
+        if (a === '不分袋') return -1;
+        if (b === '不分袋') return 1;
         return a.localeCompare(b, 'zh-Hant', { numeric: true });
       });
 
@@ -1966,7 +1966,7 @@
       text += `外送時間：${formatDeliveryDateTime(document.getElementById('info-date').value, document.getElementById('info-time').value)}\n`;
       text += `------------------------\n`;
 
-      if (sortedSGs.length === 1 && sortedSGs[0] === '不分單') {
+      if (sortedSGs.length === 1 && sortedSGs[0] === '不分袋') {
         const { summary, specialNotes, totalAmount, mealCount, drinkCount } = computeSummary();
         const sortedKeys = sortKeysByMenuOrder(Object.keys(summary));
         sortedKeys.forEach(k => text += `${k} x ${summary[k]}\n`);
@@ -2067,17 +2067,17 @@
             <div class="flex flex-wrap justify-between items-start p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
               <div class="flex items-center gap-2">
                 <select onchange="updateSubGroup('${o.id}', this.value)" class="border border-slate-300 text-xs p-1 rounded bg-white font-bold text-blue-700 outline-none">
-                  <option value="0" ${currentSg===0?'selected':''}>不分單</option>
-                  <option value="1" ${currentSg===1?'selected':''}>第1單</option>
-                  <option value="2" ${currentSg===2?'selected':''}>第2單</option>
-                  <option value="3" ${currentSg===3?'selected':''}>第3單</option>
-                  <option value="4" ${currentSg===4?'selected':''}>第4單</option>
-                  <option value="5" ${currentSg===5?'selected':''}>第5單</option>
-                  <option value="6" ${currentSg===6?'selected':''}>第6單</option>
-                  <option value="7" ${currentSg===7?'selected':''}>第7單</option>
-                  <option value="8" ${currentSg===8?'selected':''}>第8單</option>
-                  <option value="9" ${currentSg===9?'selected':''}>第9單</option>
-                  <option value="10" ${currentSg===10?'selected':''}>第10單</option>
+                  <option value="0" ${currentSg===0?'selected':''}>不分袋</option>
+                  <option value="1" ${currentSg===1?'selected':''}>第1袋</option>
+                  <option value="2" ${currentSg===2?'selected':''}>第2袋</option>
+                  <option value="3" ${currentSg===3?'selected':''}>第3袋</option>
+                  <option value="4" ${currentSg===4?'selected':''}>第4袋</option>
+                  <option value="5" ${currentSg===5?'selected':''}>第5袋</option>
+                  <option value="6" ${currentSg===6?'selected':''}>第6袋</option>
+                  <option value="7" ${currentSg===7?'selected':''}>第7袋</option>
+                  <option value="8" ${currentSg===8?'selected':''}>第8袋</option>
+                  <option value="9" ${currentSg===9?'selected':''}>第9袋</option>
+                  <option value="10" ${currentSg===10?'selected':''}>第10袋</option>
                 </select>
 
                 <button type="button" onclick="togglePaid('${o.id}')" class="${o.is_paid ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'} text-white px-2.5 py-1 rounded-md text-xs font-bold transition cursor-pointer">
@@ -2096,7 +2096,7 @@
           `;
         }).join('');
       } else {
-        // 第1層：依分單（不分單／第1單／第2單…）；第2層：依餐點菜單順序
+        // 第1層：依分單（不分袋／第1袋／第2袋…）；第2層：依餐點菜單順序
         const bySubGroup = groupOrdersBySubGroupThenItem(filtered);
         const sgKeys = sortedSubGroupKeys(bySubGroup);
 
@@ -2388,7 +2388,7 @@
           const changeVal = localStorage.getItem(`order_change_${o.id}`);
           const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
           const paymentStatusText = o.is_paid ? (changeNum > 0 ? `已付款 (找零$${changeVal})` : '已付款') : '未付款';
-          const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}單` : '不分單';
+          const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}單` : '不分袋';
           return {
             '分單': sgText,
             '姓名': o.user_name,
@@ -2409,7 +2409,7 @@
         XLSX.utils.book_append_sheet(workbook, worksheet, "按個人對帳");
         XLSX.writeFile(workbook, `團購訂單_按個人對帳_${new Date().toISOString().slice(0,10)}.xlsx`);
       } else {
-        // 第1層：依分單（不分單／第1單／第2單…）；第2層：依餐點菜單順序
+        // 第1層：依分單（不分袋／第1袋／第2袋…）；第2層：依餐點菜單順序
         const bySubGroup = groupOrdersBySubGroupThenItem(allOrders);
         const sgKeys = sortedSubGroupKeys(bySubGroup);
         const rows = [];
