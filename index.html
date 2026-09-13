@@ -72,9 +72,9 @@
           <h2 class="text-lg font-bold text-slate-800">2. 選擇餐點</h2>
           <!-- 菜單縮圖按鈕 -->
           <div onclick="openMenuLightbox()" class="cursor-pointer group flex items-center gap-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-xl transition shadow-sm">
-            <span class="text-xl">🔍</span>
+            <span id="menu-link-icon" class="text-xl">🔍</span>
             <div class="text-left">
-              <div class="text-xs font-bold text-blue-700 group-hover:underline">點我看菜單</div>
+              <div id="menu-link-label" class="text-xs font-bold text-blue-700 group-hover:underline">點我看菜單</div>
             </div>
           </div>
         </div>
@@ -141,8 +141,9 @@
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
             <div>
-              <label class="block text-xs font-semibold text-slate-600 mb-1">菜單圖片連結</label>
-              <input type="text" id="input-menu-image-url" placeholder="https://example.com/menu.jpg" class="w-full border border-slate-300 p-2 rounded-lg text-xs outline-none bg-white">
+              <label class="block text-xs font-semibold text-slate-600 mb-1">菜單圖片連結／店家點餐頁連結</label>
+              <input type="text" id="input-menu-image-url" placeholder="貼圖片網址(.jpg/.png)或店家點餐網頁連結皆可" class="w-full border border-slate-300 p-2 rounded-lg text-xs outline-none bg-white">
+              <p class="text-[10px] text-slate-400 mt-1">💡 貼圖片網址會開放大檢視；貼一般網頁連結（例如店家官網點餐頁）則會自動開新分頁前往，方便大家看完菜單再回來這裡填單</p>
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-600 mb-1">配送門檻</label>
@@ -709,6 +710,7 @@
         document.getElementById('app-title-text').innerText = `團隊團購點餐系統`;
         document.getElementById('active-menu-name').innerText = '無';
       }
+      updateMenuLinkButtonLabel();
       selectedMenuIndex = null;
       document.getElementById('search-menu-input').value = '';
       document.getElementById('selected-item-panel').classList.add('hidden');
@@ -758,16 +760,49 @@
       }
     }
 
+    // 判斷網址是否為「圖片檔」網址（副檔名 .jpg/.png 等），排除掉查詢字串與錨點後再判斷
+    function isImageUrl(url) {
+      if (!url) return false;
+      try {
+        const clean = String(url).split('?')[0].split('#')[0];
+        return /\.(jpe?g|png|gif|webp|bmp|svg)$/i.test(clean);
+      } catch (e) {
+        return false;
+      }
+    }
+
+    // 依目前設定的菜單連結類型，更新「點我看菜單」按鈕的圖示與文字
+    function updateMenuLinkButtonLabel() {
+      const icon = document.getElementById('menu-link-icon');
+      const label = document.getElementById('menu-link-label');
+      if (!icon || !label) return;
+      if (currentMenuImageUrl && !isImageUrl(currentMenuImageUrl)) {
+        icon.innerText = '🔗';
+        label.innerText = '前往店家點餐頁看菜單';
+      } else {
+        icon.innerText = '🔍';
+        label.innerText = '點我看菜單';
+      }
+    }
+
     function openMenuLightbox() {
       const modal = document.getElementById('menu-lightbox-modal');
       const area = document.getElementById('lightbox-content-area');
       const originalLink = document.getElementById('lightbox-open-original');
+
+      // 若設定的是一般網頁連結（例如店家官網/App點餐頁），大部分網站都會擋掉被嵌入頁面內顯示，
+      // 所以改成直接開新分頁前往，原本這頁（填單頁）維持不動，看完菜單切回分頁即可繼續填單
+      if (currentMenuImageUrl && !isImageUrl(currentMenuImageUrl)) {
+        window.open(currentMenuImageUrl, '_blank', 'noopener');
+        return;
+      }
+
       if (currentMenuImageUrl) {
         area.innerHTML = `<img id="lightbox-img" src="${currentMenuImageUrl}" alt="完整的菜單大圖" onclick="toggleLightboxZoom()" class="w-full max-w-none h-auto rounded-lg shadow cursor-zoom-in mx-auto block">`;
         originalLink.href = currentMenuImageUrl;
         originalLink.classList.remove('hidden');
       } else {
-        area.innerHTML = `<div class="text-slate-400 text-sm p-8 text-center">目前啟用的菜單未設定圖片連結 (menu_image_url)</div>`;
+        area.innerHTML = `<div class="text-slate-400 text-sm p-8 text-center">目前啟用的菜單未設定圖片連結或點餐頁連結</div>`;
         originalLink.classList.add('hidden');
       }
       modal.classList.remove('hidden');
@@ -802,12 +837,22 @@
       renderMenuDropdown();
     }
 
+    // 常駐顯示在下拉選單最上方的「其他/自訂餐點」入口，讓菜單沒有涵蓋到的品項也能手動輸入品名與金額
+    function buildCustomEntryHtml() {
+      return `
+        <div onclick="selectCustomItem()" class="p-3 text-sm hover:bg-amber-50 cursor-pointer border-b border-slate-200 flex justify-between items-center transition bg-amber-50/60">
+          <span class="font-bold text-amber-700">➕ 其他／自訂餐點（菜單沒有的品項，自行輸入品名與金額）</span>
+        </div>
+      `;
+    }
+
     function renderMenuDropdown() {
       const dropdown = document.getElementById('menu-dropdown-list');
       const keyword = document.getElementById('search-menu-input').value.trim().toLowerCase();
+      const customEntryHtml = buildCustomEntryHtml();
 
       if (!currentMenuData.length) {
-        dropdown.innerHTML = `<div class="p-3 text-sm text-slate-400 text-center">目前尚未上傳或啟用菜單</div>`;
+        dropdown.innerHTML = customEntryHtml + `<div class="p-3 text-sm text-slate-400 text-center">目前尚未上傳或啟用菜單</div>`;
         dropdown.classList.remove('hidden');
         return;
       }
@@ -816,9 +861,9 @@
       const filtered = indexed.filter(({ item }) => item.name.toLowerCase().includes(keyword));
 
       if (filtered.length === 0) {
-        dropdown.innerHTML = `<div class="p-3 text-sm text-slate-400 text-center">找不到符合關鍵字的餐點</div>`;
+        dropdown.innerHTML = customEntryHtml + `<div class="p-3 text-sm text-slate-400 text-center">找不到符合關鍵字的餐點，可點擊上方「其他／自訂餐點」手動輸入</div>`;
       } else {
-        dropdown.innerHTML = filtered.map(({ item, origIdx }) => `
+        dropdown.innerHTML = customEntryHtml + filtered.map(({ item, origIdx }) => `
           <div onclick="selectMenuItem(${origIdx})" class="p-3 text-sm hover:bg-blue-50 cursor-pointer border-b last:border-b-0 border-slate-100 flex justify-between items-center transition">
             <span class="font-bold text-slate-800">${item.name}</span>
             <span class="text-xs font-extrabold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">$${item.price}</span>
@@ -860,6 +905,7 @@
       const addonSel = prefill.addonSel || [];
       const note = prefill.note || '';
       const qty = prefill.qty || 1;
+      const manualExtra = prefill.manualExtra || 0;
 
       const sizeHtml = sizeGroups.map((group, gIdx) => {
         if (!group || group.length <= 1) return '';
@@ -901,7 +947,10 @@
         ${sizeHtml}
         ${addOnHtml}
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-1">
-          <input type="text" id="${ctx}-note-${menuIdx}" value="${escapeHtml(note)}" oninput="updateCustomizeCalc('${ctx}', ${menuIdx})" placeholder="其他備註" class="border border-slate-300 text-xs p-2 rounded-lg w-full sm:w-56 outline-none bg-white">
+          <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <input type="text" id="${ctx}-note-${menuIdx}" value="${escapeHtml(note)}" oninput="updateCustomizeCalc('${ctx}', ${menuIdx})" placeholder="其他備註（例：+1元多一份雞塊）" class="border border-slate-300 text-xs p-2 rounded-lg w-full sm:w-56 outline-none bg-white">
+            <input type="number" id="${ctx}-extra-${menuIdx}" value="${manualExtra || ''}" oninput="updateCustomizeCalc('${ctx}', ${menuIdx})" placeholder="追加金額(選填，如1)" class="border border-slate-300 text-xs p-2 rounded-lg w-full sm:w-36 outline-none bg-white">
+          </div>
 
           <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto flex-wrap">
             <div class="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shrink-0">
@@ -961,6 +1010,12 @@
       const customNote = noteInput ? noteInput.value.trim() : '';
       if (customNote) specNotes.push(customNote);
 
+      // 手動追加金額：用來處理菜單裡沒列出的臨時加價（例如活動優惠「+1元多一份雞塊」），
+      // 只填「這筆要多加多少錢」的差額，不用重新心算整筆總價，基礎價仍以菜單本身為準
+      const extraInput = document.getElementById(`${ctx}-extra-${menuIdx}`);
+      const manualExtra = extraInput ? (parseFloat(extraInput.value) || 0) : 0;
+      if (manualExtra) singleUnitPrice += manualExtra;
+
       const qtyInput = document.getElementById(`${ctx}-qty-${menuIdx}`);
       const qty = qtyInput ? (parseInt(qtyInput.value) || 1) : 1;
 
@@ -972,7 +1027,8 @@
         category: item.category || guessCategory(item.name),
         _sizeSel: sizeSel,
         _addonSel: addonSel,
-        _customNote: customNote
+        _customNote: customNote,
+        _manualExtra: manualExtra
       };
     }
 
@@ -991,6 +1047,79 @@
       val = Math.max(1, val + delta);
       input.value = val;
       updateCustomizeCalc(ctx, menuIdx);
+    }
+
+    // ================= 其他／自訂餐點（菜單沒有涵蓋到的品項）共用面板 =================
+    // ctx：面板識別前綴（'main' 前台、'modal' 後台修改視窗）
+    // prefill：{ name, price, note, qty }
+    function buildCustomItemHtml(ctx, prefill) {
+      const pf = prefill || {};
+      const name = pf.name || '';
+      const price = (pf.price !== undefined && pf.price !== null) ? pf.price : '';
+      const note = pf.note || '';
+      const qty = pf.qty || 1;
+      return `
+        <div class="space-y-2">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">品項名稱（自行輸入，例如：大麥克套餐）：</label>
+            <input type="text" id="${ctx}-custom-name" value="${escapeHtml(name)}" oninput="updateCustomItemCalc('${ctx}')" placeholder="請輸入品項名稱" class="w-full border border-slate-300 rounded-lg p-2 text-sm outline-none bg-white">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">這筆單價／總金額：</label>
+            <input type="number" id="${ctx}-custom-price" value="${price}" oninput="updateCustomItemCalc('${ctx}')" placeholder="請輸入金額" class="w-full border border-slate-300 rounded-lg p-2 text-sm outline-none bg-white">
+          </div>
+          <input type="text" id="${ctx}-custom-note" value="${escapeHtml(note)}" oninput="updateCustomItemCalc('${ctx}')" placeholder="其他備註（選填，例如：不辣、去冰）" class="border border-slate-300 text-xs p-2 rounded-lg w-full outline-none bg-white">
+          <div class="flex items-center justify-between gap-3 flex-wrap pt-1">
+            <div class="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shrink-0">
+              <button type="button" onclick="changeCustomItemQty('${ctx}', -1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-r border-slate-300 select-none">-</button>
+              <input type="number" id="${ctx}-custom-qty" value="${qty}" min="1" onchange="updateCustomItemCalc('${ctx}')" class="w-9 text-center text-xs font-bold focus:outline-none p-1">
+              <button type="button" onclick="changeCustomItemQty('${ctx}', 1)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold text-xs text-slate-600 border-l border-slate-300 select-none">+</button>
+            </div>
+            <span class="text-xs font-bold text-slate-700 shrink-0">小計: $<span id="${ctx}-custom-calc">0</span></span>
+            <span id="${ctx}-custom-confirm-slot" class="shrink-0"></span>
+          </div>
+        </div>
+      `;
+    }
+
+    // 讀取「其他/自訂餐點」面板目前輸入的內容；名稱空白時回傳 null（視為尚未填完整）
+    function getCustomItemDetails(ctx) {
+      const nameInput = document.getElementById(`${ctx}-custom-name`);
+      const priceInput = document.getElementById(`${ctx}-custom-price`);
+      const noteInput = document.getElementById(`${ctx}-custom-note`);
+      const qtyInput = document.getElementById(`${ctx}-custom-qty`);
+
+      const name = nameInput ? nameInput.value.trim() : '';
+      const price = priceInput ? (parseFloat(priceInput.value) || 0) : 0;
+      const note = noteInput ? noteInput.value.trim() : '';
+      const qty = qtyInput ? (parseInt(qtyInput.value) || 1) : 1;
+
+      if (!name) return null;
+
+      return {
+        name,
+        price,
+        qty,
+        note,
+        category: guessCategory(name),
+        _isCustom: true,
+        _customNote: note
+      };
+    }
+
+    function updateCustomItemCalc(ctx) {
+      const details = getCustomItemDetails(ctx);
+      const calcSpan = document.getElementById(`${ctx}-custom-calc`);
+      if (calcSpan) calcSpan.innerText = details ? (details.price * details.qty) : 0;
+    }
+
+    function changeCustomItemQty(ctx, delta) {
+      const input = document.getElementById(`${ctx}-custom-qty`);
+      if (!input) return;
+      let val = parseInt(input.value) || 1;
+      val = Math.max(1, val + delta);
+      input.value = val;
+      updateCustomItemCalc(ctx);
     }
 
     // ================= 前台：選擇/修改餐點面板 =================
@@ -1051,24 +1180,90 @@
       selectedMenuIndex = null;
     }
 
-    // 從購物車點擊「修改」，開啟與「選擇餐點」相同的面板並帶入原本的選擇
+    // 開啟「其他/自訂餐點」面板：用於菜單裡完全沒有涵蓋到的品項，需自行輸入品名與金額
+    // prefill 若有帶入，代表是從購物車「修改」按鈕開啟
+    function selectCustomItem(prefill) {
+      if (!prefill) editingCartIndex = null;
+      selectedMenuIndex = 'custom';
+
+      const pf = prefill || { name: '', price: '', note: '', qty: 1 };
+      document.getElementById('search-menu-input').value = pf.name || '';
+      document.getElementById('menu-dropdown-list').classList.add('hidden');
+
+      const panel = document.getElementById('selected-item-panel');
+      panel.innerHTML = `
+        <div class="flex justify-between items-center border-b pb-2">
+          <span class="font-bold text-base text-slate-800">🛒 其他／自訂餐點</span>
+        </div>
+        ${buildCustomItemHtml('main', pf)}
+      `;
+
+      const confirmSlot = document.getElementById('main-custom-confirm-slot');
+      if (confirmSlot) {
+        confirmSlot.innerHTML = `
+          <button onclick="confirmCustomPanel()" ${!isOrderingOpen ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition">
+            ${editingCartIndex !== null ? '💾 更新購物車' : '🛒 加入購物車'}
+          </button>
+        `;
+      }
+
+      panel.classList.remove('hidden');
+      updateCustomItemCalc('main');
+    }
+
+    async function confirmCustomPanel() {
+      if (!isOrderingOpen) {
+        await showCustomAlert('已結單，停止接收新訂單！');
+        return;
+      }
+      const details = getCustomItemDetails('main');
+      if (!details) {
+        await showCustomAlert('請先輸入品項名稱！');
+        return;
+      }
+
+      if (editingCartIndex !== null) {
+        userCart[editingCartIndex] = details;
+        editingCartIndex = null;
+      } else {
+        userCart.push(details);
+      }
+      userCart = mergeCartItems(userCart);
+      renderCart();
+
+      document.getElementById('search-menu-input').value = '';
+      document.getElementById('selected-item-panel').classList.add('hidden');
+      document.getElementById('selected-item-panel').innerHTML = '';
+      selectedMenuIndex = null;
+    }
+
+    // 從購物車點擊「修改」，開啟與「選擇餐點」相同的面板並帶入原本的選擇（自訂品項則開啟自訂面板）
     function editCartItem(idx) {
       if (!isOrderingOpen) return;
       const item = userCart[idx];
       if (!item) return;
-      const menuIdx = currentMenuData.findIndex(m => m.name === item.name);
-      if (menuIdx === -1) {
-        showCustomAlert('此品項已不在目前菜單中，無法使用選單直接修改，請先移除後重新選購。');
-        return;
-      }
+
       editingCartIndex = idx;
-      const prefill = {
-        sizeSel: item._sizeSel || [],
-        addonSel: item._addonSel || [],
-        note: item._customNote !== undefined ? item._customNote : (item.note || ''),
-        qty: item.qty
-      };
-      selectMenuItem(menuIdx, prefill);
+
+      if (item._isCustom) {
+        selectCustomItem({ name: item.name, price: item.price, note: item.note || '', qty: item.qty });
+      } else {
+        const menuIdx = currentMenuData.findIndex(m => m.name === item.name);
+        if (menuIdx === -1) {
+          editingCartIndex = null;
+          showCustomAlert('此品項已不在目前菜單中，無法使用選單直接修改，請先移除後重新選購。');
+          return;
+        }
+        const prefill = {
+          sizeSel: item._sizeSel || [],
+          addonSel: item._addonSel || [],
+          note: item._customNote !== undefined ? item._customNote : (item.note || ''),
+          manualExtra: item._manualExtra || 0,
+          qty: item.qty
+        };
+        selectMenuItem(menuIdx, prefill);
+      }
+
       const panel = document.getElementById('selected-item-panel');
       if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
@@ -2228,7 +2423,8 @@
       document.getElementById('modal-user-name').innerText = order.user_name;
 
       const select = document.getElementById('modal-add-select');
-      select.innerHTML = currentMenuData.map((m, idx) => `<option value="${idx}">${m.name} ($${m.price})</option>`).join('');
+      select.innerHTML = `<option value="custom">➕ 其他／自訂餐點（手動輸入）</option>` +
+        currentMenuData.map((m, idx) => `<option value="${idx}">${m.name} ($${m.price})</option>`).join('');
 
       renderModalItems();
       document.getElementById('edit-order-modal').classList.remove('hidden');
@@ -2244,12 +2440,24 @@
         total += subtotal;
 
         if (editModalItemIndex === idx) {
+          if (editModalMenuIdx === 'custom') {
+            const prefill = { name: item.name, price: item.price, note: item._customNote !== undefined ? item._customNote : (item.note || ''), qty: item.qty };
+            return `
+              <div class="p-3 bg-blue-50 rounded-xl border border-blue-200 space-y-2">
+                <div class="flex justify-between items-center border-b border-blue-100 pb-1.5">
+                  <span class="font-bold text-slate-800">✏️ 修改：其他／自訂餐點</span>
+                </div>
+                ${buildCustomItemHtml('modal', prefill)}
+              </div>
+            `;
+          }
           const menuItem = currentMenuData[editModalMenuIdx];
           if (!menuItem) return '';
           const prefill = {
             sizeSel: item._sizeSel || [],
             addonSel: item._addonSel || [],
             note: item._customNote !== undefined ? item._customNote : (item.note || ''),
+            manualExtra: item._manualExtra || 0,
             qty: item.qty
           };
           return `
@@ -2280,7 +2488,16 @@
       }).join('');
 
       let addRowHtml = '';
-      if (editModalItemIndex === 'new' && currentMenuData[editModalMenuIdx]) {
+      if (editModalItemIndex === 'new' && editModalMenuIdx === 'custom') {
+        addRowHtml = `
+          <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2">
+            <div class="flex justify-between items-center border-b border-emerald-100 pb-1.5">
+              <span class="font-bold text-slate-800">➕ 加點：其他／自訂餐點</span>
+            </div>
+            ${buildCustomItemHtml('modal', { name: '', price: '', note: '', qty: 1 })}
+          </div>
+        `;
+      } else if (editModalItemIndex === 'new' && currentMenuData[editModalMenuIdx]) {
         const menuItem = currentMenuData[editModalMenuIdx];
         const prefill = { sizeSel: [], addonSel: [], note: '', qty: 1 };
         addRowHtml = `
@@ -2298,7 +2515,23 @@
       document.getElementById('modal-total-price').innerText = total;
 
       // 填入該面板的確認/取消按鈕，並立即計算小計
-      if (editModalItemIndex !== null && currentMenuData[editModalMenuIdx]) {
+      if (editModalItemIndex !== null && editModalMenuIdx === 'custom') {
+        const confirmSlot = document.getElementById('modal-custom-confirm-slot');
+        if (confirmSlot) {
+          if (editModalItemIndex === 'new') {
+            confirmSlot.innerHTML = `
+              <button type="button" onclick="cancelModalItemEdit()" class="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-xs font-semibold">取消</button>
+              <button type="button" onclick="confirmModalItemAdd()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">加入</button>
+            `;
+          } else {
+            confirmSlot.innerHTML = `
+              <button type="button" onclick="cancelModalItemEdit()" class="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-xs font-semibold">取消</button>
+              <button type="button" onclick="confirmModalItemEdit(${editModalItemIndex})" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">儲存此項</button>
+            `;
+          }
+        }
+        updateCustomItemCalc('modal');
+      } else if (editModalItemIndex !== null && currentMenuData[editModalMenuIdx]) {
         const confirmSlot = document.getElementById(`modal-confirm-slot-${editModalMenuIdx}`);
         if (confirmSlot) {
           if (editModalItemIndex === 'new') {
@@ -2320,6 +2553,14 @@
     function startModalItemEdit(idx) {
       const item = editingItems[idx];
       if (!item) return;
+
+      if (item._isCustom) {
+        editModalItemIndex = idx;
+        editModalMenuIdx = 'custom';
+        renderModalItems();
+        return;
+      }
+
       const menuIdx = currentMenuData.findIndex(m => m.name === item.name);
       if (menuIdx === -1) {
         showCustomAlert('此品項已不在目前菜單中，無法使用選單直接修改，僅能刪除。');
@@ -2331,7 +2572,14 @@
     }
 
     function startModalItemAdd() {
-      const idx = parseInt(document.getElementById('modal-add-select').value);
+      const val = document.getElementById('modal-add-select').value;
+      if (val === 'custom') {
+        editModalItemIndex = 'new';
+        editModalMenuIdx = 'custom';
+        renderModalItems();
+        return;
+      }
+      const idx = parseInt(val);
       if (isNaN(idx) || !currentMenuData[idx]) return;
       editModalItemIndex = 'new';
       editModalMenuIdx = idx;
@@ -2345,7 +2593,7 @@
     }
 
     function confirmModalItemEdit(idx) {
-      const details = getCustomizeDetails('modal', editModalMenuIdx);
+      const details = editModalMenuIdx === 'custom' ? getCustomItemDetails('modal') : getCustomizeDetails('modal', editModalMenuIdx);
       if (!details) return;
       editingItems[idx] = details;
       editModalItemIndex = null;
@@ -2355,7 +2603,7 @@
     }
 
     function confirmModalItemAdd() {
-      const details = getCustomizeDetails('modal', editModalMenuIdx);
+      const details = editModalMenuIdx === 'custom' ? getCustomItemDetails('modal') : getCustomizeDetails('modal', editModalMenuIdx);
       if (!details) return;
       editingItems.push(details);
       editModalItemIndex = null;
