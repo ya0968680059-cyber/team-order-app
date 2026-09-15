@@ -99,6 +99,7 @@
         <h2 class="text-lg font-bold border-b pb-2 text-slate-800 flex items-center gap-1.5">
           <span>🛒</span> 我的餐點明細
         </h2>
+        <div id="payment-status-display" class="hidden p-3 rounded-lg text-sm font-bold flex items-center justify-between gap-2"></div>
         <div id="cart-list" class="space-y-2 text-sm text-slate-600 min-h-[50px]">
           <p class="text-slate-400">購物車目前是空的</p>
         </div>
@@ -735,6 +736,16 @@
       renderOrdersSection();
       renderSummarySection();
       renderPrintTables();
+
+      // 若前台姓名欄位目前有輸入值，重新整理其付款狀態顯示（避免資料更新後顯示過期狀態）
+      const nameInputEl = document.getElementById('user-name-input');
+      if (nameInputEl) {
+        const currentName = nameInputEl.value.trim();
+        if (currentName) {
+          const matchedOrder = allOrders.find(o => o.user_name === currentName);
+          renderPaymentStatusDisplay(currentName, matchedOrder);
+        }
+      }
     }
 
     async function sortOrdersBySubGroup() {
@@ -1338,6 +1349,34 @@
       renderCart();
     }
 
+    // 依目前姓名欄位內容與 allOrders 資料，更新「付款狀態」顯示區塊
+    function renderPaymentStatusDisplay(name, existingOrder) {
+      const box = document.getElementById('payment-status-display');
+      if (!box) return;
+
+      if (!name) {
+        box.classList.add('hidden');
+        box.innerHTML = '';
+        return;
+      }
+
+      if (!existingOrder) {
+        box.classList.remove('hidden');
+        box.className = 'p-3 rounded-lg text-sm font-bold flex items-center justify-between gap-2 bg-slate-100 border border-slate-300 text-slate-500';
+        box.innerHTML = `<span>ℹ️ 查無「${escapeHtml(name)}」的訂購紀錄</span>`;
+        return;
+      }
+
+      box.classList.remove('hidden');
+      if (existingOrder.is_paid) {
+        box.className = 'p-3 rounded-lg text-sm font-bold flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-300 text-emerald-700';
+        box.innerHTML = `<span>🟢 付款狀態：已付款</span><span>應付金額：$${existingOrder.total_price}</span>`;
+      } else {
+        box.className = 'p-3 rounded-lg text-sm font-bold flex items-center justify-between gap-2 bg-rose-50 border border-rose-300 text-rose-700';
+        box.innerHTML = `<span>🔴 付款狀態：尚未付款</span><span>應付金額：$${existingOrder.total_price}</span>`;
+      }
+    }
+
     function debounceHandleUserNameChange() {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
@@ -1346,6 +1385,7 @@
         if (!name) {
           userCart = [];
           renderCart();
+          renderPaymentStatusDisplay(name, null);
           return;
         }
         const existingOrder = allOrders.find(o => o.user_name === name);
@@ -1355,6 +1395,7 @@
           userCart = [];
         }
         renderCart();
+        renderPaymentStatusDisplay(name, existingOrder);
       }, 400);
     }
 
