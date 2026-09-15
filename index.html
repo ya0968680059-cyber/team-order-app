@@ -184,7 +184,7 @@
           <div class="flex items-center gap-2">
             <div class="flex gap-1 text-sm bg-slate-100 p-1 rounded-lg">
               <button onclick="switchReportViewMode('total')" id="btn-report-total" class="bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition text-xs">總統計量</button>
-              <button onclick="switchReportViewMode('subgroup')" id="btn-report-subgroup" class="text-slate-600 font-semibold px-3 py-1 rounded-md transition text-xs">分單明細</button>
+              <button onclick="switchReportViewMode('subgroup')" id="btn-report-subgroup" class="text-slate-600 font-semibold px-3 py-1 rounded-md transition text-xs">分袋明細</button>
             </div>
           </div>
         </div>
@@ -716,7 +716,7 @@
       await fetchHistoryMenus();
     }
 
-    // 修改處：先依單號排序 (不分袋排最前面，接著第1袋、第2袋...)，再依訂購人姓名排序
+    // 修改處：先依袋號排序 (不分袋排最前面，接著第1袋、第2袋...)，再依訂購人姓名排序
     function sortOrders(arr) {
       arr.sort((a, b) => {
         let sgA = (a.sub_group !== null && a.sub_group !== undefined && a.sub_group > 0) ? a.sub_group : -1;
@@ -763,7 +763,7 @@
         renderSummarySection();
         renderPrintTables();
 
-        await showCustomAlert('🔄 已完成更新並依單號與姓名重新排序！');
+        await showCustomAlert('🔄 已完成更新並依袋號與姓名重新排序！');
       } finally {
         if (btn) { btn.disabled = false; btn.innerText = '🔄 更新訂單並排序'; }
       }
@@ -2055,8 +2055,8 @@
       });
     }
 
-    // 依「分單」分組，組内再依餐點分組：{ sg: { itemKey: [{name, qty}] } }
-    // 第1層排序＝分單（不分袋→第1袋→第2袋…），第2層排序＝餐點（依菜單順序）
+    // 依「分袋」分組，組内再依餐點分組：{ sg: { itemKey: [{name, qty}] } }
+    // 第1層排序＝分袋（不分袋→第1袋→第2袋…），第2層排序＝餐點（依菜單順序）
     function groupOrdersBySubGroupThenItem(orders) {
       const bySubGroup = {};
       orders.forEach(o => {
@@ -2072,7 +2072,7 @@
     }
 
     function subGroupLabel(sg) {
-      return sg > 0 ? `第${sg}單` : '不分袋';
+      return sg > 0 ? `第${sg}袋` : '不分袋';
     }
 
     function sortedSubGroupKeys(subGroupsObj) {
@@ -2138,7 +2138,7 @@
       } else {
         const subGroups = {};
         allOrders.forEach(o => {
-          const sg = (o.sub_group !== null && o.sub_group !== undefined && o.sub_group > 0) ? `第${o.sub_group}單` : '不分袋';
+          const sg = (o.sub_group !== null && o.sub_group !== undefined && o.sub_group > 0) ? `第${o.sub_group}袋` : '不分袋';
           if (!subGroups[sg]) subGroups[sg] = [];
           subGroups[sg].push(o);
         });
@@ -2195,7 +2195,7 @@
       const categoryMap = getCategoryMap();
 
       allOrders.forEach(o => {
-        const sg = (o.sub_group !== null && o.sub_group !== undefined && o.sub_group > 0) ? `第${o.sub_group}單` : '不分袋';
+        const sg = (o.sub_group !== null && o.sub_group !== undefined && o.sub_group > 0) ? `第${o.sub_group}袋` : '不分袋';
         if (!subGroups[sg]) subGroups[sg] = [];
         subGroups[sg].push(o);
       });
@@ -2256,7 +2256,7 @@
       }
 
       navigator.clipboard.writeText(text);
-      await showCustomAlert('📋 已成功將帶有分單標題的 Line 報餐訊息複製至剪貼簿！');
+      await showCustomAlert('📋 已成功將帶有分袋標題的 Line 報餐訊息複製至剪貼簿！');
     }
 
     function switchViewMode(mode) {
@@ -2271,7 +2271,7 @@
       const subGroupNum = parseInt(val) || 0;
       const { error } = await sb.from('orders').update({ sub_group: subGroupNum }).eq('id', orderId);
       if (error) {
-        await showCustomAlert(`❌ 更新分單失敗：${error.message}`);
+        await showCustomAlert(`❌ 更新分袋失敗：${error.message}`);
         return;
       }
       await fetchOrders();
@@ -2344,7 +2344,7 @@
           `;
         }).join('');
       } else {
-        // 第1層：依分單（不分袋／第1袋／第2袋…）；第2層：依餐點菜單順序
+        // 第1層：依分袋（不分袋／第1袋／第2袋…）；第2層：依餐點菜單順序
         const bySubGroup = groupOrdersBySubGroupThenItem(filtered);
         const sgKeys = sortedSubGroupKeys(bySubGroup);
 
@@ -2689,9 +2689,9 @@
           const changeVal = localStorage.getItem(`order_change_${o.id}`);
           const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
           const paymentStatusText = o.is_paid ? (changeNum > 0 ? `已付款 (找零$${changeVal})` : '已付款') : '未付款';
-          const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}單` : '不分袋';
+          const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}袋` : '不分袋';
           return {
-            '分單': sgText,
+            '分袋': sgText,
             '姓名': o.user_name,
             // 同一人點多樣品項時，改用換行分隔（而非逗號），比較不容易看漏
             '訂購明細': mergeCartItems(o.items).map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('\n'),
@@ -2710,7 +2710,7 @@
         XLSX.utils.book_append_sheet(workbook, worksheet, "按個人對帳");
         XLSX.writeFile(workbook, `團購訂單_按個人對帳_${new Date().toISOString().slice(0,10)}.xlsx`);
       } else {
-        // 第1層：依分單（不分袋／第1袋／第2袋…）；第2層：依餐點菜單順序
+        // 第1層：依分袋（不分袋／第1袋／第2袋…）；第2層：依餐點菜單順序
         const bySubGroup = groupOrdersBySubGroupThenItem(allOrders);
         const sgKeys = sortedSubGroupKeys(bySubGroup);
         const rows = [];
@@ -2721,7 +2721,7 @@
             const entries = itemGroupsInSg[k];
             const totalQty = entries.reduce((acc, c) => acc + c.qty, 0);
             rows.push({
-              '分單': subGroupLabel(sg),
+              '分袋': subGroupLabel(sg),
               '餐點/品項': k,
               '總份數': totalQty,
               '訂購名單與數量': entries.map(u => `${u.name} x${u.qty}`).join('\n')
@@ -2752,7 +2752,7 @@
       titleEle.innerText = '團購現場發餐對帳劃單表（按個人對帳）';
       headerEle.innerHTML = `
         <th class="border border-black p-2 text-center w-12">核對</th>
-        <th class="border border-black p-2 w-20 text-center">分單</th>
+        <th class="border border-black p-2 w-20 text-center">分袋</th>
         <th class="border border-black p-2 w-28">姓名</th>
         <th class="border border-black p-2">訂購明細與規格</th>
         <th class="border border-black p-2 text-right w-24">應付金額</th>
@@ -2762,7 +2762,7 @@
         const changeVal = localStorage.getItem(`order_change_${o.id}`);
         const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
         const statusText = o.is_paid ? (changeNum > 0 ? `已付 (找$${changeVal})` : '已付') : '未付';
-        const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}單` : '-';
+        const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}袋` : '-';
         return `
           <tr>
             <td class="border border-black p-2 text-center">☐</td>
@@ -2776,7 +2776,7 @@
       }).join('');
     }
 
-    // 按餐點發放｜列印表格：第1層＝分單，第2層＝餐點（依菜單順序）
+    // 按餐點發放｜列印表格：第1層＝分袋，第2層＝餐點（依菜單順序）
     function renderPrintTableItem() {
       const titleEle = document.getElementById('print-title-item');
       const summaryEle = document.getElementById('print-summary-line-item');
