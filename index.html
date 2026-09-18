@@ -18,9 +18,20 @@
       body { background: white; color: black; padding: 0; }
     }
     .print-only { display: none; }
+
+    @keyframes newOrderToastIn {
+      from { opacity: 0; transform: translateX(16px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    #new-order-toast-container .new-order-toast {
+      animation: newOrderToastIn 0.25s ease-out;
+    }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 font-sans min-h-screen pb-10">
+
+  <!-- 新訂單提示卡片容器（浮動在畫面右上角，僅後台使用） -->
+  <div id="new-order-toast-container" class="fixed top-4 right-4 z-[100] w-72 space-y-2 no-print pointer-events-none"></div>
 
   <!-- 頂部導覽列 -->
   <header class="bg-blue-600 text-white p-4 shadow-md no-print sticky top-0 z-40">
@@ -245,10 +256,6 @@
                 <option value="10">第10袋</option>
               </select>
             </div>
-            <!-- 更新訂單並重新排序按鈕 -->
-            <button id="btn-refresh-sort" onclick="sortOrdersBySubGroup()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg transition text-xs flex items-center gap-1">
-              🔄 更新訂單並排序
-            </button>
             <div class="flex gap-2 text-sm bg-slate-100 p-1 rounded-lg">
               <button onclick="switchViewMode('person')" id="btn-view-person" class="bg-blue-600 text-white font-semibold px-3 py-1 rounded-md transition text-xs">👤 按個人對帳</button>
               <button onclick="switchViewMode('item')" id="btn-view-item" class="text-slate-600 font-semibold px-3 py-1 rounded-md transition text-xs">🍱 按餐點發放</button>
@@ -510,6 +517,13 @@
     let editModalItemIndex = null;   // 後台修改訂單彈窗：目前正在修改的項目索引（'new' = 加點模式）
     let editModalMenuIdx = null;     // 後台修改訂單彈窗：目前面板對應的菜單品項索引
 
+    // ===== 新訂單自動偵測／自動刷新（輪詢法）相關狀態 =====
+    let knownOrderIds = null;   // null = 尚未建立基準值（第一次抓取時不跳通知，避免把既有訂單全部誤判成新訂單）
+    let adminPollTimer = null;  // 後台輪詢計時器（僅在後台畫面開啟時運作）
+    let isFetchingOrders = false; // 簡單防重入鎖，避免輪詢與手動操作同時打 API 互相干擾
+    let titleFlashTimer = null;   // 分頁標題閃爍計時器（離開分頁時才會啟動）
+    const PAGE_ORIGINAL_TITLE = document.title;
+
     const DRINK_KEYWORDS = ['茶','咖啡','可樂','汽水','果汁','豆漿','奶茶','可可','紅茶','綠茶','冬瓜','紅葉','珍奶','飲料','奶昔','氣泡水','沙士','湯','羹','味噌湯','玉米濃湯','清湯','酸辣湯','牛肉湯'];
     const DIET_WARNING_KEYWORDS = ['素','全素','蔬食','過敏','禁忌','不吃','不含'];
 
@@ -728,44 +742,118 @@
     }
 
     async function fetchOrders() {
-      const { data } = await sb.from('orders').select('*').eq('group_id', currentGroupId).eq('room', ROOM).order('created_at', { ascending: false });
-      allOrders = data || [];
-      sortOrders(allOrders);
-      renderOrdersSection();
-      renderSummarySection();
-      renderPrintTables();
-
-      // 若前台姓名欄位目前有輸入值，重新整理其付款狀態顯示（避免資料更新後顯示過期狀態）
-      const nameInputEl = document.getElementById('user-name-input');
-      if (nameInputEl) {
-        const currentName = nameInputEl.value.trim();
-        if (currentName) {
-          const matchedOrder = allOrders.find(o => o.user_name === currentName);
-          renderPaymentStatusDisplay(currentName, matchedOrder);
-        }
-      }
-    }
-
-    async function sortOrdersBySubGroup() {
-      const btn = document.getElementById('btn-refresh-sort');
-      if (btn) { btn.disabled = true; btn.innerText = '⏳ 更新中...'; }
+      if (isFetchingOrders) return; // 上一次抓取還沒結束就跳過這次，避免輪詢與手動操作互相搶跑
+      isFetchingOrders = true;
 
       try {
         const { data, error } = await sb.from('orders').select('*').eq('group_id', currentGroupId).eq('room', ROOM).order('created_at', { ascending: false });
         if (error) {
-          await showCustomAlert(`❌ 更新訂單失敗：${error.message}`);
+          console.error('抓取訂單失敗:', error);
           return;
         }
-        allOrders = data || [];
-        sortOrders(allOrders);
+        const newData = data || [];
 
+        // 偵測「全新出現的訂單編號」＝真正的新訂單。
+        // 團主自己標記付款／刪除／修改訂單，動到的都是既有 id（update/delete），不會被誤判成新訂單。
+        if (knownOrderIds !== null) {
+          const newlyArrived = newData.filter(o => !knownOrderIds.has(o.id));
+          if (newlyArrived.length > 0) {
+            notifyNewOrders(newlyArrived);
+          }
+        }
+        knownOrderIds = new Set(newData.map(o => o.id));
+
+        allOrders = newData;
+        sortOrders(allOrders); // 第1層：依分袋（不分袋→第1袋→第2袋…）；第2層：依訂購人姓名（含數字/英文排序）
         renderOrdersSection();
         renderSummarySection();
         renderPrintTables();
 
-        await showCustomAlert('🔄 已完成更新並依袋號與姓名重新排序！');
+        // 若前台姓名欄位目前有輸入值，重新整理其付款狀態顯示（避免資料更新後顯示過期狀態）
+        const nameInputEl = document.getElementById('user-name-input');
+        if (nameInputEl) {
+          const currentName = nameInputEl.value.trim();
+          if (currentName) {
+            const matchedOrder = allOrders.find(o => o.user_name === currentName);
+            renderPaymentStatusDisplay(currentName, matchedOrder);
+          }
+        }
       } finally {
-        if (btn) { btn.disabled = false; btn.innerText = '🔄 更新訂單並排序'; }
+        isFetchingOrders = false;
+      }
+    }
+
+    // ===== 後台輪詢：開著後台時每 5 秒自動重新抓訂單並重新排序、渲染畫面 =====
+    function startAdminPolling() {
+      if (adminPollTimer) return;
+      adminPollTimer = setInterval(() => { fetchOrders(); }, 5000);
+    }
+    function stopAdminPolling() {
+      if (adminPollTimer) { clearInterval(adminPollTimer); adminPollTimer = null; }
+    }
+
+    // ===== 新訂單通知：畫面右上角提示卡片 + 提示音 + （離開分頁時）標題閃爍 =====
+    function notifyNewOrders(newOrders) {
+      newOrders.forEach(o => showNewOrderToast(o));
+      playNewOrderSound();
+      if (document.hidden) startTitleFlash(newOrders.length);
+    }
+
+    function showNewOrderToast(order) {
+      const container = document.getElementById('new-order-toast-container');
+      if (!container) return;
+
+      const toast = document.createElement('div');
+      toast.className = 'new-order-toast pointer-events-auto bg-white border-l-4 border-emerald-500 shadow-lg rounded-lg px-4 py-3';
+      toast.innerHTML = `
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <p class="text-sm font-bold text-emerald-700">🔔 新訂單進來了！</p>
+            <p class="text-sm text-slate-700 mt-0.5">${escapeHtml(order.user_name || '未具名')} · NT$ ${order.total_price ?? 0}</p>
+          </div>
+          <button type="button" onclick="this.closest('.new-order-toast').remove()" class="text-slate-400 hover:text-slate-600 text-xs leading-none">✕</button>
+        </div>
+      `;
+      container.appendChild(toast);
+      setTimeout(() => { toast.remove(); }, 8000);
+    }
+
+    function playNewOrderSound() {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.setValueAtTime(1046.5, ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.35);
+      } catch (e) {
+        console.warn('提示音播放失敗（可忽略）:', e);
+      }
+    }
+
+    function startTitleFlash(count) {
+      if (titleFlashTimer) return;
+      let toggle = false;
+      titleFlashTimer = setInterval(() => {
+        document.title = toggle ? PAGE_ORIGINAL_TITLE : `🔔 新訂單(${count}) 進來了！`;
+        toggle = !toggle;
+      }, 1000);
+      document.addEventListener('visibilitychange', stopTitleFlashOnFocus);
+    }
+
+    function stopTitleFlashOnFocus() {
+      if (!document.hidden) {
+        if (titleFlashTimer) { clearInterval(titleFlashTimer); titleFlashTimer = null; }
+        document.title = PAGE_ORIGINAL_TITLE;
+        document.removeEventListener('visibilitychange', stopTitleFlashOnFocus);
       }
     }
 
@@ -1547,6 +1635,8 @@
         <button onclick="openChangePasswordModal()" class="bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg text-xs font-semibold transition">修改密碼</button>
         <button onclick="switchToUserView()" class="bg-rose-700 hover:bg-rose-800 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition">切換前台</button>
       `;
+
+      startAdminPolling(); // 進入後台畫面：開始每 5 秒自動偵測新訂單、自動刷新排序
     }
 
     function switchToUserView() {
@@ -1559,6 +1649,8 @@
           ⚙️ 團主管理
         </button>
       `;
+
+      stopAdminPolling(); // 切回前台：停止輪詢，避免不必要的請求
     }
 
     async function toggleOrderStatus(status) {
