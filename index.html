@@ -2282,7 +2282,7 @@
             <div class="mb-4 last:mb-0 border-b border-slate-200 pb-3 last:border-b-0 last:pb-0">
               <div class="font-extrabold text-blue-700 bg-blue-50 px-2.5 py-1 rounded mb-2 text-xs flex justify-between items-center">
                 <span>【${sgName}】</span>
-                <span>金額：$${groupTotal} ｜ 餐點：${groupMealCount}份</span>
+                <span>金額：$${groupTotal} ｜ 餐點：${groupMealCount}份${groupDrinkCount > 0 ? ` ｜ 湯品/飲料：${groupDrinkCount}份` : ''}</span>
               </div>
               <div class="space-y-1 pl-2">
                 ${sortedKeys.map(k => `<div class="text-slate-700">• <strong>${k}</strong> x ${groupSummary[k]}</div>`).join('')}
@@ -2377,7 +2377,7 @@
           text += `📌 【${sgName}】\n`;
           const sortedKeys = sortKeysByMenuOrder(Object.keys(groupSummary));
           sortedKeys.forEach(k => text += `• ${k} x ${groupSummary[k]}\n`);
-          text += `小計：餐點 ${groupMeal} 份 ｜ 金額 $${groupTotal} 元\n`;
+          text += `小計：餐點 ${groupMeal} 份${groupDrink > 0 ? ` ｜ 湯品/飲料 ${groupDrink} 份` : ''} ｜ 金額 $${groupTotal} 元\n`;
           text += `------------------------\n`;
         });
 
