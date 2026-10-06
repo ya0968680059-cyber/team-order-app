@@ -529,6 +529,9 @@
     let editModalMenuIdx = null;     // 後台修改訂單彈窗：目前面板對應的菜單品項索引
 
     // ===== 新訂單自動偵測／自動刷新（輪詢法）相關狀態 =====
+    let knownOrderSigs = new Map(); // 訂單編號 → 內容簽名（用來偵測既有訂單被同事修改）
+    let isCurrentOrderLocked = false; // 前台：目前輸入姓名的訂單是否已付款（已付款 = 鎖定，不能自行修改）
+    const LOCKED_MSG = '🔒 您的訂單已付款，系統已鎖定，無法自行修改或取消。\n如需追加或更改品項，請聯絡團主協助處理。';
     let knownOrderIds = null;   // null = 尚未建立基準值（第一次抓取時不跳通知，避免把既有訂單全部誤判成新訂單）
     let adminPollTimer = null;  // 後台輪詢計時器（僅在後台畫面開啟時運作）
     let isFetchingOrders = false; // 簡單防重入鎖，避免輪詢與手動操作同時打 API 互相干擾
@@ -706,6 +709,10 @@
         readonlyBanner.classList.remove('hidden');
         submitBtn.disabled = true;
       }
+      if (isCurrentOrderLocked) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = '🔒 訂單已鎖定';
+      }
       renderCart();
     }
 
@@ -741,6 +748,14 @@
       await fetchHistoryMenus();
     }
 
+    // 訂單內容簽名：用來判斷「品項有沒有真的被改過」
+    function orderSig(items) {
+      return mergeCartItems(items || []).map(i => `${i.name}|${i.note || ''}|${i.price}|${i.qty}`).join(';');
+    }
+    function orderFullSig(o) {
+      return orderSig(o.items) + '#' + (Number(o.total_price) || 0);
+    }
+
     // 修改處：先依袋號排序 (不分袋排最前面，接著第1袋、第2袋...)，再依訂購人姓名排序
     function sortOrders(arr) {
       arr.sort((a, b) => {
@@ -772,6 +787,17 @@
             notifyNewOrders(newlyArrived);
           }
         }
+        // 偵測「既有訂單被同事自己修改」（is_modified = true 且內容簽名變了）→ 通知團主
+        const modifiedByUsers = [];
+        if (knownOrderIds !== null) {
+          newData.forEach(o => {
+            const prevSig = knownOrderSigs.get(String(o.id));
+            if (prevSig !== undefined && prevSig !== orderFullSig(o) && o.is_modified) modifiedByUsers.push(o);
+          });
+        }
+        knownOrderSigs = new Map(newData.map(o => [String(o.id), orderFullSig(o)]));
+        if (modifiedByUsers.length > 0 && isAdminAuthed()) notifyModifiedOrders(modifiedByUsers);
+
         knownOrderIds = new Set(newData.map(o => o.id));
 
         allOrders = newData;
@@ -822,6 +848,35 @@
           <div>
             <p class="text-sm font-bold text-emerald-700">🔔 新訂單進來了！</p>
             <p class="text-sm text-slate-700 mt-0.5">${escapeHtml(order.user_name || '未具名')} · NT$ ${order.total_price ?? 0}</p>
+          </div>
+          <button type="button" onclick="this.closest('.new-order-toast').remove()" class="text-slate-400 hover:text-slate-600 text-xs leading-none">✕</button>
+        </div>
+      `;
+      container.appendChild(toast);
+      setTimeout(() => { toast.remove(); }, 8000);
+    }
+
+    function notifyModifiedOrders(orders) {
+      orders.forEach(o => showModifiedOrderToast(o));
+      playNewOrderSound();
+      if (document.hidden) startTitleFlash(orders.length);
+    }
+
+    function showModifiedOrderToast(order) {
+      const container = document.getElementById('new-order-toast-container');
+      if (!container) return;
+      const now = Number(order.total_price) || 0;
+      const prev = order.prev_total != null ? Number(order.prev_total) : now;
+      const diff = now - prev;
+      const diffText = diff > 0 ? `已追加 +$${diff}` : (diff < 0 ? `已減少 -$${Math.abs(diff)}` : '已修改品項');
+
+      const toast = document.createElement('div');
+      toast.className = 'new-order-toast pointer-events-auto bg-white border-l-4 border-sky-500 shadow-lg rounded-lg px-4 py-3';
+      toast.innerHTML = `
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <p class="text-sm font-bold text-sky-700">✏️ 有人修改了訂單！</p>
+            <p class="text-sm text-slate-700 mt-0.5">${escapeHtml(order.user_name || '未具名')} · ${diffText}（$${prev} → $${now}）</p>
           </div>
           <button type="button" onclick="this.closest('.new-order-toast').remove()" class="text-slate-400 hover:text-slate-600 text-xs leading-none">✕</button>
         </div>
@@ -989,10 +1044,11 @@
       return v > 0 ? `(+$${v})` : `(-$${Math.abs(v)})`;
     }
 
-    // 加點選項名稱照菜單設定原樣顯示，不自動補「加」字
-    // （想顯示「加」就直接在菜單的選項名稱裡寫，例如：加多汁）
+    // 避免「加點」品項名稱本身已含「加」或「不加」字樣時，明細出現重複的「加」字
     function formatAddonNote(name) {
-      return String(name || '').trim();
+      const n = String(name || '');
+      if (n.startsWith('加') || n.startsWith('不')) return n;
+      return `加${n}`;
     }
 
     // 將加點加價選項欄位資料統一轉為「分組」結構（陣列的陣列），相容舊資料（單一扁平陣列）
@@ -1270,6 +1326,10 @@
         await showCustomAlert('已結單，停止接收新訂單！');
         return;
       }
+      if (isCurrentOrderLocked) {
+        await showCustomAlert(LOCKED_MSG);
+        return;
+      }
       const details = getCustomizeDetails('main', menuIdx);
       if (!details) return;
 
@@ -1324,6 +1384,10 @@
         await showCustomAlert('已結單，停止接收新訂單！');
         return;
       }
+      if (isCurrentOrderLocked) {
+        await showCustomAlert(LOCKED_MSG);
+        return;
+      }
       const details = getCustomItemDetails('main');
       if (!details) {
         await showCustomAlert('請先輸入品項名稱！');
@@ -1347,7 +1411,7 @@
 
     // 從購物車點擊「修改」，開啟與「選擇餐點」相同的面板並帶入原本的選擇（自訂品項則開啟自訂面板）
     function editCartItem(idx) {
-      if (!isOrderingOpen) return;
+      if (!isOrderingOpen || isCurrentOrderLocked) return;
       const item = userCart[idx];
       if (!item) return;
 
@@ -1399,6 +1463,7 @@
 
     function renderCart() {
       const container = document.getElementById('cart-list');
+      const cartLocked = !isOrderingOpen || isCurrentOrderLocked;
       let total = 0;
       if (userCart.length === 0) {
         container.innerHTML = `<p class="text-slate-400">購物車目前是空的</p>`;
@@ -1418,8 +1483,8 @@
             </div>
             <div class="flex items-center gap-3">
               <span class="font-bold text-sm text-slate-800">$${subtotal}</span>
-              <button onclick="editCartItem(${idx})" ${!isOrderingOpen ? 'disabled' : ''} class="text-blue-600 disabled:text-slate-300 text-xs font-semibold hover:underline disabled:no-underline disabled:cursor-not-allowed">修改</button>
-              <button onclick="removeFromCart(${idx})" ${!isOrderingOpen ? 'disabled' : ''} class="text-rose-600 disabled:text-slate-300 text-xs font-semibold hover:underline disabled:no-underline disabled:cursor-not-allowed">移除</button>
+              <button onclick="editCartItem(${idx})" ${cartLocked ? 'disabled' : ''} class="text-blue-600 disabled:text-slate-300 text-xs font-semibold hover:underline disabled:no-underline disabled:cursor-not-allowed">修改</button>
+              <button onclick="removeFromCart(${idx})" ${cartLocked ? 'disabled' : ''} class="text-rose-600 disabled:text-slate-300 text-xs font-semibold hover:underline disabled:no-underline disabled:cursor-not-allowed">移除</button>
             </div>
           </div>
         `;
@@ -1440,14 +1505,46 @@
     }
 
     function removeFromCart(idx) {
-      if (!isOrderingOpen) return;
+      if (!isOrderingOpen || isCurrentOrderLocked) return;
       userCart.splice(idx, 1);
       if (editingCartIndex !== null) resetSelectedItemPanel();
       renderCart();
     }
 
     // 依目前姓名欄位內容與 allOrders 資料，更新「付款狀態」顯示區塊
+    // 依「目前姓名的訂單是否已付款」切換前台鎖定狀態（已付款 → 不能再改餐點、不能送出）
+    function applyLockUI(order) {
+      const locked = !!(order && order.is_paid);
+      const changed = locked !== isCurrentOrderLocked;
+      isCurrentOrderLocked = locked;
+
+      const submitBtn = document.getElementById('submit-order-btn');
+      const searchInput = document.getElementById('search-menu-input');
+      if (submitBtn) {
+        if (locked) {
+          submitBtn.disabled = true;
+          submitBtn.innerText = '🔒 訂單已鎖定';
+        } else {
+          submitBtn.innerText = '🚀 確認送出訂單';
+          submitBtn.disabled = !isOrderingOpen;
+        }
+      }
+      if (searchInput) {
+        searchInput.disabled = locked;
+        searchInput.placeholder = locked
+          ? '🔒 訂單已付款鎖定，無法再點餐'
+          : '請點擊選擇或輸入關鍵字搜尋（如：排骨、紅茶）...';
+      }
+      if (locked) {
+        resetSelectedItemPanel();
+        const dd = document.getElementById('menu-dropdown-list');
+        if (dd) dd.classList.add('hidden');
+      }
+      if (changed) renderCart();
+    }
+
     function renderPaymentStatusDisplay(name, existingOrder) {
+      applyLockUI(existingOrder);
       const box = document.getElementById('payment-status-display');
       if (!box) return;
 
@@ -1466,8 +1563,8 @@
 
       box.classList.remove('hidden');
       if (existingOrder.is_paid) {
-        box.className = 'p-3 rounded-lg text-sm font-bold flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-300 text-emerald-700';
-        box.innerHTML = `<span>🟢 付款狀態：已付款</span><span>應付金額：$${existingOrder.total_price}</span>`;
+        box.className = 'p-3 rounded-lg text-sm font-bold flex flex-wrap items-center justify-between gap-2 bg-emerald-50 border border-emerald-300 text-emerald-700';
+        box.innerHTML = `<span>🟢 付款狀態：已付款</span><span>應付金額：$${existingOrder.total_price}</span><span class="w-full text-xs font-semibold text-emerald-800">🔒 訂單已鎖定，如需追加或修改品項請聯絡團主</span>`;
       } else {
         box.className = 'p-3 rounded-lg text-sm font-bold flex items-center justify-between gap-2 bg-rose-50 border border-rose-300 text-rose-700';
         box.innerHTML = `<span>🔴 付款狀態：尚未付款</span><span>應付金額：$${existingOrder.total_price}</span>`;
@@ -1530,6 +1627,12 @@
 
       const existingOrderForCancel = allOrders.find(o => o.user_name === name);
 
+      // 已付款的訂單已鎖定，同事不能自行修改或取消（需由團主處理）
+      if (existingOrderForCancel && existingOrderForCancel.is_paid) {
+        await showCustomAlert(LOCKED_MSG);
+        return;
+      }
+
       // 購物車是空的：如果本來就沒有訂單，提示錯誤；如果本來有訂單，代表使用者是把品項全部移除後想取消整筆訂單
       if (userCart.length === 0) {
         if (!existingOrderForCancel) {
@@ -1545,9 +1648,16 @@
         submitBtn.innerText = '⏳ 訂單取消中...';
 
         try {
-          const { error: cancelError } = await sb.from('orders').delete().eq('id', existingOrderForCancel.id);
+          // 加上「尚未付款」條件：若團主剛好在這一刻收了錢，資料庫會直接拒絕刪除
+          const { data: cancelRows, error: cancelError } = await sb.from('orders').delete()
+            .eq('id', existingOrderForCancel.id).or('is_paid.eq.false,is_paid.is.null').select('id');
           if (cancelError) {
             await showCustomAlert(`❌ 取消訂單失敗：${cancelError.message}`);
+          } else if (!cancelRows || cancelRows.length === 0) {
+            await fetchOrders();
+            const fresh = allOrders.find(o => o.user_name === name);
+            if (fresh) { userCart = mergeCartItems(fresh.items.map(i => ({ ...i }))); renderCart(); }
+            await showCustomAlert(fresh && fresh.is_paid ? LOCKED_MSG : '⚠️ 訂單狀態已變更，請重新確認後再操作。');
           } else {
             await showCustomAlert(`✅ 已取消 ${name} 的訂單！`);
             await fetchOrders();
@@ -1573,10 +1683,21 @@
 
         const existingOrder = allOrders.find(o => o.user_name === name);
         let error = null;
+        let updateBlocked = false;
 
         if (existingOrder) {
-          const res = await sb.from('orders').update({ items: finalCart, total_price: total }).eq('id', existingOrder.id);
+          // 品項真的有變動才打「已修改」標記，並記下修改前的金額（連續修改多次，保留最早那次的原金額）
+          const upd = { items: finalCart, total_price: total };
+          if (orderSig(finalCart) !== orderSig(existingOrder.items)) {
+            upd.is_modified = true;
+            upd.prev_total = (existingOrder.is_modified && existingOrder.prev_total != null)
+              ? existingOrder.prev_total : existingOrder.total_price;
+          }
+          // 加上「尚未付款」條件：若團主剛好在這一刻收了錢，資料庫會直接拒絕這次修改
+          const res = await sb.from('orders').update(upd)
+            .eq('id', existingOrder.id).or('is_paid.eq.false,is_paid.is.null').select('id');
           error = res.error;
+          if (!error && (!res.data || res.data.length === 0)) updateBlocked = true;
         } else {
           const res = await sb.from('orders').insert([{ user_name: name, items: finalCart, total_price: total, is_paid: false, group_id: currentGroupId, sub_group: 0, room: ROOM }]);
           error = res.error;
@@ -1585,6 +1706,11 @@
         if (error) {
           console.error('Supabase 寫入失敗:', error);
           await showCustomAlert(`❌ 訂單送出失敗：${error.message || '請確認資料庫權限或網路連線！'}`);
+        } else if (updateBlocked) {
+          await fetchOrders();
+          const fresh = allOrders.find(o => o.user_name === name);
+          if (fresh) { userCart = mergeCartItems(fresh.items.map(i => ({ ...i }))); renderCart(); }
+          await showCustomAlert(fresh && fresh.is_paid ? LOCKED_MSG : '⚠️ 訂單狀態已變更（可能已被團主處理），請重新確認後再送出。');
         } else {
           await showCustomAlert(`🎉 訂購成功！${name} 應付 $${total} 元`);
 
@@ -2435,13 +2561,19 @@
       if (viewMode === 'person') {
         container.innerHTML = filtered.map(o => {
           const sortedItems = mergeCartItems(o.items || []);
-          const changeVal = localStorage.getItem(`order_change_${o.id}`);
-          const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
+          const changeNum = parseInt(o.change_amount) || 0;
+          const changeVal = changeNum;
           const changeBadge = (o.is_paid && changeNum > 0) ? `<button type="button" onclick="clearChange('${o.id}')" title="找錢完成後點我，這個提示就會消失" class="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer">找$${changeVal} ✕</button>` : '';
+          const nowTotal = parseInt(o.total_price) || 0;
+          const modDiff = nowTotal - (o.prev_total != null ? (parseInt(o.prev_total) || 0) : nowTotal);
+          const modLabel = modDiff > 0 ? `已追加 +$${modDiff}` : (modDiff < 0 ? `已減少 -$${Math.abs(modDiff)}` : '已修改品項');
+          const modBadge = o.is_modified
+            ? `<button type="button" onclick="clearModified('${o.id}')" title="確認過修改內容後點我，這個標記就會消失" class="bg-sky-100 hover:bg-sky-200 text-sky-800 border border-sky-300 px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer">✏️ ${modLabel}${o.prev_total != null ? `（原$${o.prev_total}）` : ''} ✕</button>`
+            : '';
           const currentSg = (o.sub_group !== null && o.sub_group !== undefined) ? o.sub_group : 0;
 
           return `
-            <div class="flex flex-wrap justify-between items-start p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
+            <div class="flex flex-wrap justify-between items-start p-2.5 border ${o.is_modified ? 'border-sky-400 ring-1 ring-sky-300' : 'border-slate-200'} rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
               <div class="flex items-center gap-2">
                 <select onchange="updateSubGroup('${o.id}', this.value)" class="border border-slate-300 text-xs p-1 rounded bg-white font-bold text-blue-700 outline-none">
                   <option value="0" ${currentSg===0?'selected':''}>不分袋</option>
@@ -2463,6 +2595,7 @@
                 <span class="font-bold text-slate-800 text-base">${escapeHtml(o.user_name)}</span>
                 <span class="text-slate-500 font-extrabold">($${o.total_price})</span>
                 ${changeBadge}
+                ${modBadge}
               </div>
               <div class="text-xs text-slate-600 flex-1 px-2 leading-relaxed">${sortedItems.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('<br>')}</div>
               <div class="flex gap-1.5">
@@ -2517,6 +2650,7 @@
         return; 
       }
 
+      let payUpdate;
       if (!order.is_paid) {
         const input = await showCustomPrompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元\n請輸入實收金額（例如 500 或 1000）：`, order.total_price);
         if (input === null) return;
@@ -2530,9 +2664,8 @@
           return;
         }
         const change = received - order.total_price;
-        
-        localStorage.setItem(`order_change_${id}`, change);
-        localStorage.setItem(`order_received_${id}`, received);
+        // 找零資訊存進資料庫（不再用 localStorage），換電腦／換瀏覽器也看得到；收款同時清掉「已修改」標記
+        payUpdate = { is_paid: true, received_amount: received, change_amount: change, is_modified: false, prev_total: null };
 
         if (change > 0) {
           await showCustomAlert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
@@ -2540,26 +2673,47 @@
           await showCustomAlert(`💡 剛好付清，無需找零！\n（確認後將標記為已付款）`);
         }
       } else {
-        localStorage.removeItem(`order_change_${id}`);
-        localStorage.removeItem(`order_received_${id}`);
+        payUpdate = { is_paid: false, received_amount: null, change_amount: 0 };
       }
 
-      const newPaidStatus = !order.is_paid;
-      const { error } = await sb.from('orders').update({ is_paid: newPaidStatus }).eq('id', id);
-      
+      let q = sb.from('orders').update(payUpdate).eq('id', id);
+      // 收款時多加一道保險：只有「金額仍是畫面上這個數字」才標記已付款，避免同事剛好在這一刻改了訂單
+      if (payUpdate.is_paid) q = q.eq('total_price', order.total_price);
+      const { data: payRows, error } = await q.select('id');
+
       if (error) {
         await showCustomAlert(`❌ 更新付款狀態失敗：${error.message}`);
+        return;
+      }
+      if (!payRows || payRows.length === 0) {
+        await fetchOrders();
+        await showCustomAlert('⚠️ 這筆訂單剛剛被修改過（金額已變動），尚未標記為已付款。\n請看一下最新內容後，再重新收款。');
         return;
       }
       
       await fetchOrders();
     }
 
-    function clearChange(id) {
-      // 找錢完成後，只移除「待找零」的提示標記，不改變已付款/未付款狀態，不需要重新整理整頁
-      localStorage.removeItem(`order_change_${id}`);
-      localStorage.removeItem(`order_received_${id}`);
-      renderOrdersSection();
+    async function clearChange(id) {
+      // 找錢完成後，只移除「待找零」的提示標記，不改變已付款/未付款狀態（存在資料庫，所有裝置同步）
+      const order = allOrders.find(o => String(o.id) === String(id));
+      if (order) { order.change_amount = 0; renderOrdersSection(); }
+      const { error } = await sb.from('orders').update({ change_amount: 0 }).eq('id', id);
+      if (error) {
+        await showCustomAlert(`❌ 更新失敗：${error.message}`);
+        await fetchOrders();
+      }
+    }
+
+    // 團主看過同事的修改內容後，點「✏️ 已追加」標記即可消除
+    async function clearModified(id) {
+      const order = allOrders.find(o => String(o.id) === String(id));
+      if (order) { order.is_modified = false; order.prev_total = null; renderOrdersSection(); }
+      const { error } = await sb.from('orders').update({ is_modified: false, prev_total: null }).eq('id', id);
+      if (error) {
+        await showCustomAlert(`❌ 更新失敗：${error.message}`);
+        await fetchOrders();
+      }
     }
 
     async function deleteOrder(id) {
@@ -2567,8 +2721,6 @@
       const name = order ? order.user_name : '';
       const confirmDel = await showCustomConfirm(`確定要刪除 ${name} 的整筆訂單嗎？`);
       if (!confirmDel) return;
-      localStorage.removeItem(`order_change_${id}`);
-      localStorage.removeItem(`order_received_${id}`);
       const { error } = await sb.from('orders').delete().eq('id', id);
       if (error) { 
         await showCustomAlert(`❌ 刪除失敗：${error.message}`); 
@@ -2796,6 +2948,8 @@
         await showCustomAlert(`❌ 儲存修改失敗：${error.message}`);
         return;
       }
+      // 團主自己改的，不要再跳「有人修改了訂單」的通知
+      knownOrderSigs.set(String(editingOrderId), orderSig(finalEditingItems) + '#' + (Number(total) || 0));
       
       closeEditModal();
       await fetchOrders();
@@ -2815,8 +2969,8 @@
     function exportExcel() {
       if (viewMode === 'person') {
         const rows = allOrders.map(o => {
-          const changeVal = localStorage.getItem(`order_change_${o.id}`);
-          const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
+          const changeNum = parseInt(o.change_amount) || 0;
+          const changeVal = changeNum;
           const paymentStatusText = o.is_paid ? (changeNum > 0 ? `已付款 (找零$${changeVal})` : '已付款') : '未付款';
           const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}袋` : '不分袋';
           return {
@@ -2888,8 +3042,8 @@
         <th class="border border-black p-2 text-center w-28">付款/找零狀態</th>
       `;
       tbody.innerHTML = allOrders.map(o => {
-        const changeVal = localStorage.getItem(`order_change_${o.id}`);
-        const changeNum = changeVal !== null ? parseInt(changeVal) : 0;
+        const changeNum = parseInt(o.change_amount) || 0;
+        const changeVal = changeNum;
         const statusText = o.is_paid ? (changeNum > 0 ? `已付 (找$${changeVal})` : '已付') : '未付';
         const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}袋` : '-';
         return `
