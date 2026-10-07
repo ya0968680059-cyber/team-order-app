@@ -529,7 +529,6 @@
     let editModalMenuIdx = null;     // 後台修改訂單彈窗：目前面板對應的菜單品項索引
 
     // ===== 新訂單自動偵測／自動刷新（輪詢法）相關狀態 =====
-    let knownOrderSigs = new Map(); // 訂單編號 → 內容簽名（用來偵測既有訂單被同事修改）
     let isCurrentOrderLocked = false; // 前台：目前輸入姓名的訂單是否已付款（已付款 = 鎖定，不能自行修改）
     const LOCKED_MSG = '🔒 您的訂單已付款，系統已鎖定，無法自行修改或取消。\n如需追加或更改品項，請聯絡團主協助處理。';
     let knownOrderIds = null;   // null = 尚未建立基準值（第一次抓取時不跳通知，避免把既有訂單全部誤判成新訂單）
@@ -748,14 +747,6 @@
       await fetchHistoryMenus();
     }
 
-    // 訂單內容簽名：用來判斷「品項有沒有真的被改過」
-    function orderSig(items) {
-      return mergeCartItems(items || []).map(i => `${i.name}|${i.note || ''}|${i.price}|${i.qty}`).join(';');
-    }
-    function orderFullSig(o) {
-      return orderSig(o.items) + '#' + (Number(o.total_price) || 0);
-    }
-
     // 修改處：先依袋號排序 (不分袋排最前面，接著第1袋、第2袋...)，再依訂購人姓名排序
     function sortOrders(arr) {
       arr.sort((a, b) => {
@@ -787,17 +778,6 @@
             notifyNewOrders(newlyArrived);
           }
         }
-        // 偵測「既有訂單被同事自己修改」（is_modified = true 且內容簽名變了）→ 通知團主
-        const modifiedByUsers = [];
-        if (knownOrderIds !== null) {
-          newData.forEach(o => {
-            const prevSig = knownOrderSigs.get(String(o.id));
-            if (prevSig !== undefined && prevSig !== orderFullSig(o) && o.is_modified) modifiedByUsers.push(o);
-          });
-        }
-        knownOrderSigs = new Map(newData.map(o => [String(o.id), orderFullSig(o)]));
-        if (modifiedByUsers.length > 0 && isAdminAuthed()) notifyModifiedOrders(modifiedByUsers);
-
         knownOrderIds = new Set(newData.map(o => o.id));
 
         allOrders = newData;
@@ -848,35 +828,6 @@
           <div>
             <p class="text-sm font-bold text-emerald-700">🔔 新訂單進來了！</p>
             <p class="text-sm text-slate-700 mt-0.5">${escapeHtml(order.user_name || '未具名')} · NT$ ${order.total_price ?? 0}</p>
-          </div>
-          <button type="button" onclick="this.closest('.new-order-toast').remove()" class="text-slate-400 hover:text-slate-600 text-xs leading-none">✕</button>
-        </div>
-      `;
-      container.appendChild(toast);
-      setTimeout(() => { toast.remove(); }, 8000);
-    }
-
-    function notifyModifiedOrders(orders) {
-      orders.forEach(o => showModifiedOrderToast(o));
-      playNewOrderSound();
-      if (document.hidden) startTitleFlash(orders.length);
-    }
-
-    function showModifiedOrderToast(order) {
-      const container = document.getElementById('new-order-toast-container');
-      if (!container) return;
-      const now = Number(order.total_price) || 0;
-      const prev = order.prev_total != null ? Number(order.prev_total) : now;
-      const diff = now - prev;
-      const diffText = diff > 0 ? `已追加 +$${diff}` : (diff < 0 ? `已減少 -$${Math.abs(diff)}` : '已修改品項');
-
-      const toast = document.createElement('div');
-      toast.className = 'new-order-toast pointer-events-auto bg-white border-l-4 border-sky-500 shadow-lg rounded-lg px-4 py-3';
-      toast.innerHTML = `
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <p class="text-sm font-bold text-sky-700">✏️ 有人修改了訂單！</p>
-            <p class="text-sm text-slate-700 mt-0.5">${escapeHtml(order.user_name || '未具名')} · ${diffText}（$${prev} → $${now}）</p>
           </div>
           <button type="button" onclick="this.closest('.new-order-toast').remove()" class="text-slate-400 hover:text-slate-600 text-xs leading-none">✕</button>
         </div>
@@ -1686,15 +1637,8 @@
         let updateBlocked = false;
 
         if (existingOrder) {
-          // 品項真的有變動才打「已修改」標記，並記下修改前的金額（連續修改多次，保留最早那次的原金額）
-          const upd = { items: finalCart, total_price: total };
-          if (orderSig(finalCart) !== orderSig(existingOrder.items)) {
-            upd.is_modified = true;
-            upd.prev_total = (existingOrder.is_modified && existingOrder.prev_total != null)
-              ? existingOrder.prev_total : existingOrder.total_price;
-          }
           // 加上「尚未付款」條件：若團主剛好在這一刻收了錢，資料庫會直接拒絕這次修改
-          const res = await sb.from('orders').update(upd)
+          const res = await sb.from('orders').update({ items: finalCart, total_price: total })
             .eq('id', existingOrder.id).or('is_paid.eq.false,is_paid.is.null').select('id');
           error = res.error;
           if (!error && (!res.data || res.data.length === 0)) updateBlocked = true;
@@ -2564,16 +2508,10 @@
           const changeNum = parseInt(o.change_amount) || 0;
           const changeVal = changeNum;
           const changeBadge = (o.is_paid && changeNum > 0) ? `<button type="button" onclick="clearChange('${o.id}')" title="找錢完成後點我，這個提示就會消失" class="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer">找$${changeVal} ✕</button>` : '';
-          const nowTotal = parseInt(o.total_price) || 0;
-          const modDiff = nowTotal - (o.prev_total != null ? (parseInt(o.prev_total) || 0) : nowTotal);
-          const modLabel = modDiff > 0 ? `已追加 +$${modDiff}` : (modDiff < 0 ? `已減少 -$${Math.abs(modDiff)}` : '已修改品項');
-          const modBadge = o.is_modified
-            ? `<button type="button" onclick="clearModified('${o.id}')" title="確認過修改內容後點我，這個標記就會消失" class="bg-sky-100 hover:bg-sky-200 text-sky-800 border border-sky-300 px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer">✏️ ${modLabel}${o.prev_total != null ? `（原$${o.prev_total}）` : ''} ✕</button>`
-            : '';
           const currentSg = (o.sub_group !== null && o.sub_group !== undefined) ? o.sub_group : 0;
 
           return `
-            <div class="flex flex-wrap justify-between items-start p-2.5 border ${o.is_modified ? 'border-sky-400 ring-1 ring-sky-300' : 'border-slate-200'} rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
+            <div class="flex flex-wrap justify-between items-start p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 hover:bg-white transition gap-2">
               <div class="flex items-center gap-2">
                 <select onchange="updateSubGroup('${o.id}', this.value)" class="border border-slate-300 text-xs p-1 rounded bg-white font-bold text-blue-700 outline-none">
                   <option value="0" ${currentSg===0?'selected':''}>不分袋</option>
@@ -2595,7 +2533,6 @@
                 <span class="font-bold text-slate-800 text-base">${escapeHtml(o.user_name)}</span>
                 <span class="text-slate-500 font-extrabold">($${o.total_price})</span>
                 ${changeBadge}
-                ${modBadge}
               </div>
               <div class="text-xs text-slate-600 flex-1 px-2 leading-relaxed">${sortedItems.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('<br>')}</div>
               <div class="flex gap-1.5">
@@ -2664,8 +2601,8 @@
           return;
         }
         const change = received - order.total_price;
-        // 找零資訊存進資料庫（不再用 localStorage），換電腦／換瀏覽器也看得到；收款同時清掉「已修改」標記
-        payUpdate = { is_paid: true, received_amount: received, change_amount: change, is_modified: false, prev_total: null };
+        // 找零資訊存進資料庫，換電腦／換瀏覽器也看得到
+        payUpdate = { is_paid: true, received_amount: received, change_amount: change };
 
         if (change > 0) {
           await showCustomAlert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
@@ -2699,17 +2636,6 @@
       const order = allOrders.find(o => String(o.id) === String(id));
       if (order) { order.change_amount = 0; renderOrdersSection(); }
       const { error } = await sb.from('orders').update({ change_amount: 0 }).eq('id', id);
-      if (error) {
-        await showCustomAlert(`❌ 更新失敗：${error.message}`);
-        await fetchOrders();
-      }
-    }
-
-    // 團主看過同事的修改內容後，點「✏️ 已追加」標記即可消除
-    async function clearModified(id) {
-      const order = allOrders.find(o => String(o.id) === String(id));
-      if (order) { order.is_modified = false; order.prev_total = null; renderOrdersSection(); }
-      const { error } = await sb.from('orders').update({ is_modified: false, prev_total: null }).eq('id', id);
       if (error) {
         await showCustomAlert(`❌ 更新失敗：${error.message}`);
         await fetchOrders();
@@ -2948,8 +2874,6 @@
         await showCustomAlert(`❌ 儲存修改失敗：${error.message}`);
         return;
       }
-      // 團主自己改的，不要再跳「有人修改了訂單」的通知
-      knownOrderSigs.set(String(editingOrderId), orderSig(finalEditingItems) + '#' + (Number(total) || 0));
       
       closeEditModal();
       await fetchOrders();
