@@ -221,13 +221,17 @@
         </div>
 
         <!-- 統計卡片 -->
-        <div class="grid grid-cols-3 gap-2.5 text-center">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
           <div class="bg-blue-50 border border-blue-100 rounded-xl p-2.5">
             <div class="text-[11px] text-blue-500 font-semibold">餐點總份數</div>
             <div id="stat-meal-count" class="text-lg font-extrabold text-blue-700">0</div>
           </div>
+          <div class="bg-orange-50 border border-orange-100 rounded-xl p-2.5">
+            <div class="text-[11px] text-orange-600 font-semibold">湯品總份數</div>
+            <div id="stat-soup-count" class="text-lg font-extrabold text-orange-700">0</div>
+          </div>
           <div class="bg-amber-50 border border-amber-100 rounded-xl p-2.5">
-            <div class="text-[11px] text-amber-600 font-semibold">湯品/飲料總份數</div>
+            <div class="text-[11px] text-amber-600 font-semibold">飲料總份數</div>
             <div id="stat-drink-count" class="text-lg font-extrabold text-amber-700">0</div>
           </div>
           <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-2.5">
@@ -1392,7 +1396,7 @@
     }
 
     function guessCategory(name) {
-      return DRINK_KEYWORDS.some(k => name.includes(k)) ? 'drink' : 'meal';
+      return classifyText(name) || 'meal';
     }
 
     function mergeCartItems(cart) {
@@ -1939,7 +1943,7 @@
           const sizes = parseSpecColumn(row['規格']);
           const addOns = parseAddOnColumn(row['加點'] || row['加點項目']);
           const rawCategory = (row['類別'] || row['分類'] || '').toString();
-          const category = rawCategory.includes('飲') || rawCategory.includes('湯') ? 'drink' : (rawCategory.includes('餐') ? 'meal' : guessCategory(String(name)));
+          const category = rawCategory.includes('湯') ? 'soup' : rawCategory.includes('飲') ? 'drink' : (rawCategory.includes('餐') ? 'meal' : guessCategory(String(name)));
           return { name, price, sizes, addOns, category };
         }).filter(i => i.name && i.name !== '未命名' && i.price >= 0);
 
@@ -2091,7 +2095,7 @@
       const rows = menuList.map(item => {
         const specStr = item.sizes ? item.sizes.map(group => (group || []).map(s => `${s.name}:${s.extra}`).join('/')).join(';') : '';
         const addOnStr = item.addOns ? normalizeAddOnGroups(item.addOns).map(group => (group || []).map(a => `${a.name}:${a.price}`).join('/')).join(';') : '';
-        const categoryStr = item.category === 'drink' ? '飲料' : '餐點';
+        const categoryStr = item.category === 'soup' ? '湯品' : (item.category === 'drink' ? '飲料' : '餐點');
 
         return {
           '品項': item.name,
@@ -2190,26 +2194,48 @@
       updateRoomSelectLabels();
     }
 
-    // 計算單一品項的「餐點份數／湯品飲料份數」。
-    // 主餐點照常算餐點；備註（或品名括號）裡的加點若是湯品/飲料（例如「加魚丸湯」），
-    // 另外算進湯品/飲料。「不加湯」「去冰」這類否定開頭的備註不會被誤算。
+    // 判斷一段文字屬於「湯品(soup)」「飲料(drink)」或都不是(null)。含「湯」「羹」視為湯品，其餘飲料關鍵字視為飲料。
+    function classifyText(text) {
+      const t = String(text || '');
+      if (/[湯羹]/.test(t)) return 'soup';
+      if (DRINK_KEYWORDS.some(k => t.includes(k))) return 'drink';
+      return null;
+    }
+
+    // 計算單一品項的「餐點／湯品／飲料」份數。
+    // 主餐點照常算餐點（份數不減）；備註（或品名括號）裡的加點若是湯品或飲料（例如「加魚丸湯」），
+    // 再各自另外算一份。「不加湯」「去冰」這類否定開頭的備註不會被誤算。
     function countMealDrink(i, categoryMap) {
       const qty = i.qty || 0;
-      const cat = i.category || categoryMap[i.name] || guessCategory(i.name);
-      if (cat === 'drink') return { meal: 0, drink: qty };
+      let cat = i.category || categoryMap[i.name] || guessCategory(i.name);
+      // 相容舊資料：以前湯品與飲料都存成 'drink'，這裡依品名重新分辨
+      if (cat === 'drink' && classifyText(i.name) === 'soup') cat = 'soup';
+      if (cat === 'soup') return { meal: 0, soup: qty, drink: 0 };
+      if (cat === 'drink') return { meal: 0, soup: 0, drink: qty };
 
       const parts = [];
       if (i.note) parts.push(...String(i.note).split(/[,，、]/));
       const m = String(i.name || '').match(/[（(]([^）)]*)[）)]/);
       if (m) parts.push(...m[1].split(/[,，、]/));
 
-      let extraDrinks = 0;
+      let extraSoup = 0, extraDrink = 0;
       parts.forEach(part => {
         const p = part.trim();
         if (!p || /^(不|去|免|少|無|没|沒)/.test(p)) return;
-        if (DRINK_KEYWORDS.some(k => p.includes(k))) extraDrinks += 1;
+        const kind = classifyText(p);
+        if (kind === 'soup') extraSoup += 1;
+        else if (kind === 'drink') extraDrink += 1;
       });
-      return { meal: qty, drink: extraDrinks * qty };
+      return { meal: qty, soup: extraSoup * qty, drink: extraDrink * qty };
+    }
+
+    // 組出「餐點／湯品／飲料」統計文字；showZero=false 時，湯品或飲料為 0 就省略（用在分袋小計）
+    function formatCounts(meal, soup, drink, long, showZero) {
+      const suffix = long ? '總份數' : '';
+      const parts = [`餐點${suffix}：${meal} 份`];
+      if (showZero || soup > 0) parts.push(`湯品${suffix}：${soup} 份`);
+      if (showZero || drink > 0) parts.push(`飲料${suffix}：${drink} 份`);
+      return parts.join(' ｜ ');
     }
 
     function getCategoryMap() {
@@ -2288,6 +2314,7 @@
       let totalAmount = 0;
       let mealCount = 0;
       let drinkCount = 0;
+      let soupCount = 0;
 
       allOrders.forEach(o => {
         totalAmount += o.total_price;
@@ -2296,7 +2323,7 @@
           summary[key] = (summary[key] || 0) + i.qty;
 
           const c = countMealDrink(i, categoryMap);
-          mealCount += c.meal; drinkCount += c.drink;
+          mealCount += c.meal; soupCount += c.soup; drinkCount += c.drink;
 
           if (i.note && DIET_WARNING_KEYWORDS.some(k => i.note.includes(k))) {
             specialNotes.push(`${o.user_name}: ${i.name} [${i.note}]`);
@@ -2304,13 +2331,14 @@
         });
       });
 
-      return { summary, specialNotes, totalAmount, mealCount, drinkCount };
+      return { summary, specialNotes, totalAmount, mealCount, soupCount, drinkCount };
     }
 
     function renderSummarySection() {
-      const { specialNotes, totalAmount, mealCount, drinkCount } = computeSummary();
+      const { specialNotes, totalAmount, mealCount, soupCount, drinkCount } = computeSummary();
 
       document.getElementById('stat-meal-count').innerText = mealCount;
+      document.getElementById('stat-soup-count').innerText = soupCount;
       document.getElementById('stat-drink-count').innerText = drinkCount;
       document.getElementById('stat-est-total').innerText = `$${totalAmount}`;
 
@@ -2328,7 +2356,7 @@
             <div>${specialNotes.join('<br>')}</div>
           </div>`;
         }
-        html += `<div class="font-bold border-t border-slate-200 pt-2.5 mt-3 text-right text-slate-800 text-base">餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元</div>`;
+        html += `<div class="font-bold border-t border-slate-200 pt-2.5 mt-3 text-right text-slate-800 text-base">${formatCounts(mealCount, soupCount, drinkCount, true, true)} ｜ 預估總金額：$${totalAmount} 元</div>`;
         box.innerHTML = html;
       } else {
         const subGroups = {};
@@ -2356,6 +2384,7 @@
           let groupTotal = 0;
           let groupMealCount = 0;
           let groupDrinkCount = 0;
+          let groupSoupCount = 0;
 
           ordersInGroup.forEach(o => {
             groupTotal += o.total_price;
@@ -2363,7 +2392,7 @@
               const key = i.note ? `${i.name} (${i.note})` : i.name;
               groupSummary[key] = (groupSummary[key] || 0) + i.qty;
               const c = countMealDrink(i, categoryMap);
-              groupMealCount += c.meal; groupDrinkCount += c.drink;
+              groupMealCount += c.meal; groupSoupCount += c.soup; groupDrinkCount += c.drink;
             });
           });
 
@@ -2373,7 +2402,7 @@
             <div class="mb-4 last:mb-0 border-b border-slate-200 pb-3 last:border-b-0 last:pb-0">
               <div class="font-extrabold text-blue-700 bg-blue-50 px-2.5 py-1 rounded mb-2 text-xs flex justify-between items-center">
                 <span>【${sgName}】</span>
-                <span>金額：$${groupTotal} ｜ 餐點：${groupMealCount}份${groupDrinkCount > 0 ? ` ｜ 湯品/飲料：${groupDrinkCount}份` : ''}</span>
+                <span>金額：$${groupTotal} ｜ ${formatCounts(groupMealCount, groupSoupCount, groupDrinkCount, false, false)}</span>
               </div>
               <div class="space-y-1 pl-2">
                 ${sortedKeys.map(k => `<div class="text-slate-700">• <strong>${k}</strong> x ${groupSummary[k]}</div>`).join('')}
@@ -2391,7 +2420,7 @@
       const totalEl = document.getElementById('public-summary-total');
       if (!box || !totalEl) return; // 若目前頁面沒有這個區塊（例如尚未渲染），直接跳過
 
-      const { summary, mealCount, drinkCount } = computeSummary();
+      const { summary, mealCount, soupCount, drinkCount } = computeSummary();
       const sortedKeys = sortKeysByMenuOrder(Object.keys(summary));
 
       if (sortedKeys.length === 0) {
@@ -2407,7 +2436,7 @@
         </div>
       `).join('');
 
-      totalEl.innerText = `餐點總份數：${mealCount} 份　｜　湯品/飲料總份數：${drinkCount} 份`;
+      totalEl.innerText = formatCounts(mealCount, soupCount, drinkCount, true, true);
       totalEl.classList.remove('hidden');
     }
 
@@ -2436,7 +2465,7 @@
       text += `------------------------\n`;
 
       if (sortedSGs.length === 1 && sortedSGs[0] === '不分袋') {
-        const { summary, specialNotes, totalAmount, mealCount, drinkCount } = computeSummary();
+        const { summary, specialNotes, totalAmount, mealCount, soupCount, drinkCount } = computeSummary();
         const sortedKeys = sortKeysByMenuOrder(Object.keys(summary));
         sortedKeys.forEach(k => text += `${k} x ${summary[k]}\n`);
 
@@ -2445,7 +2474,7 @@
           specialNotes.forEach(n => text += `${n}\n`);
         }
         text += `------------------------\n`;
-        text += `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份\n`;
+        text += `${formatCounts(mealCount, soupCount, drinkCount, true, true)}\n`;
         text += `總金額：$${totalAmount} 元`;
       } else {
         sortedSGs.forEach(sgName => {
@@ -2454,6 +2483,7 @@
           let groupTotal = 0;
           let groupMeal = 0;
           let groupDrink = 0;
+          let groupSoup = 0;
 
           ordersInGroup.forEach(o => {
             groupTotal += o.total_price;
@@ -2461,19 +2491,19 @@
               const key = i.note ? `${i.name} (${i.note})` : i.name;
               groupSummary[key] = (groupSummary[key] || 0) + i.qty;
               const c = countMealDrink(i, categoryMap);
-              groupMeal += c.meal; groupDrink += c.drink;
+              groupMeal += c.meal; groupSoup += c.soup; groupDrink += c.drink;
             });
           });
 
           text += `📌 【${sgName}】\n`;
           const sortedKeys = sortKeysByMenuOrder(Object.keys(groupSummary));
           sortedKeys.forEach(k => text += `• ${k} x ${groupSummary[k]}\n`);
-          text += `小計：餐點 ${groupMeal} 份${groupDrink > 0 ? ` ｜ 湯品/飲料 ${groupDrink} 份` : ''} ｜ 金額 $${groupTotal} 元\n`;
+          text += `小計：${formatCounts(groupMeal, groupSoup, groupDrink, false, false)} ｜ 金額 $${groupTotal} 元\n`;
           text += `------------------------\n`;
         });
 
-        const { totalAmount, mealCount, drinkCount } = computeSummary();
-        text += `總計：餐點 ${mealCount} 份 ｜ 湯品/飲料 ${drinkCount} 份 ｜ 總金額 $${totalAmount} 元`;
+        const { totalAmount, mealCount, soupCount, drinkCount } = computeSummary();
+        text += `總計：${formatCounts(mealCount, soupCount, drinkCount, false, true)} ｜ 總金額 $${totalAmount} 元`;
       }
 
       navigator.clipboard.writeText(text);
@@ -2932,8 +2962,8 @@
         const worksheet = XLSX.utils.json_to_sheet(rows);
         worksheet['!cols'] = [{ wch: 10 }, { wch: 12 }, { wch: 36 }, { wch: 10 }, { wch: 18 }, { wch: 12 }];
         applyWrapTextToColumn(worksheet, 2, rows.length); // 訂購明細欄位換行
-        const { totalAmount, mealCount, drinkCount } = computeSummary();
-        const summaryLine = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
+        const { totalAmount, mealCount, soupCount, drinkCount } = computeSummary();
+        const summaryLine = `${formatCounts(mealCount, soupCount, drinkCount, true, true)} ｜ 預估總金額：$${totalAmount} 元`;
         XLSX.utils.sheet_add_aoa(worksheet, [[], [summaryLine]], { origin: -1 });
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "按個人對帳");
@@ -2960,8 +2990,8 @@
         const worksheet = XLSX.utils.json_to_sheet(rows);
         worksheet['!cols'] = [{ wch: 10 }, { wch: 24 }, { wch: 12 }, { wch: 40 }];
         applyWrapTextToColumn(worksheet, 3, rows.length); // 訂購名單與數量欄位換行
-        const { totalAmount, mealCount, drinkCount } = computeSummary();
-        const summaryLine = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
+        const { totalAmount, mealCount, soupCount, drinkCount } = computeSummary();
+        const summaryLine = `${formatCounts(mealCount, soupCount, drinkCount, true, true)} ｜ 預估總金額：$${totalAmount} 元`;
         XLSX.utils.sheet_add_aoa(worksheet, [[], [summaryLine]], { origin: -1 });
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "按餐點發放");
@@ -2976,8 +3006,8 @@
       const headerEle = document.getElementById('print-table-header-person');
       const tbody = document.getElementById('print-table-body-person');
 
-      const { totalAmount, mealCount, drinkCount } = computeSummary();
-      summaryEle.innerText = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
+      const { totalAmount, mealCount, soupCount, drinkCount } = computeSummary();
+      summaryEle.innerText = `${formatCounts(mealCount, soupCount, drinkCount, true, true)} ｜ 預估總金額：$${totalAmount} 元`;
       titleEle.innerText = '團購現場發餐對帳劃單表（按個人對帳）';
       headerEle.innerHTML = `
         <th class="border border-black p-2 text-center w-12">核對</th>
@@ -3012,8 +3042,8 @@
       const headerEle = document.getElementById('print-table-header-item');
       const tbody = document.getElementById('print-table-body-item');
 
-      const { totalAmount, mealCount, drinkCount } = computeSummary();
-      summaryEle.innerText = `餐點總份數：${mealCount} 份 ｜ 湯品/飲料總份數：${drinkCount} 份 ｜ 預估總金額：$${totalAmount} 元`;
+      const { totalAmount, mealCount, soupCount, drinkCount } = computeSummary();
+      summaryEle.innerText = `${formatCounts(mealCount, soupCount, drinkCount, true, true)} ｜ 預估總金額：$${totalAmount} 元`;
       titleEle.innerText = '團購餐點發放清單（按餐點發放）';
       headerEle.innerHTML = `
         <th class="border border-black p-2 text-center w-12">点收</th>
