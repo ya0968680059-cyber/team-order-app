@@ -2190,6 +2190,28 @@
       updateRoomSelectLabels();
     }
 
+    // 計算單一品項的「餐點份數／湯品飲料份數」。
+    // 主餐點照常算餐點；備註（或品名括號）裡的加點若是湯品/飲料（例如「加魚丸湯」），
+    // 另外算進湯品/飲料。「不加湯」「去冰」這類否定開頭的備註不會被誤算。
+    function countMealDrink(i, categoryMap) {
+      const qty = i.qty || 0;
+      const cat = i.category || categoryMap[i.name] || guessCategory(i.name);
+      if (cat === 'drink') return { meal: 0, drink: qty };
+
+      const parts = [];
+      if (i.note) parts.push(...String(i.note).split(/[,，、]/));
+      const m = String(i.name || '').match(/[（(]([^）)]*)[）)]/);
+      if (m) parts.push(...m[1].split(/[,，、]/));
+
+      let extraDrinks = 0;
+      parts.forEach(part => {
+        const p = part.trim();
+        if (!p || /^(不|去|免|少|無|没|沒)/.test(p)) return;
+        if (DRINK_KEYWORDS.some(k => p.includes(k))) extraDrinks += 1;
+      });
+      return { meal: qty, drink: extraDrinks * qty };
+    }
+
     function getCategoryMap() {
       const map = {};
       currentMenuData.forEach(i => { map[i.name] = i.category || guessCategory(i.name); });
@@ -2273,8 +2295,8 @@
           const key = i.note ? `${i.name} (${i.note})` : i.name;
           summary[key] = (summary[key] || 0) + i.qty;
 
-          const cat = i.category || categoryMap[i.name] || guessCategory(i.name);
-          if (cat === 'drink') drinkCount += i.qty; else mealCount += i.qty;
+          const c = countMealDrink(i, categoryMap);
+          mealCount += c.meal; drinkCount += c.drink;
 
           if (i.note && DIET_WARNING_KEYWORDS.some(k => i.note.includes(k))) {
             specialNotes.push(`${o.user_name}: ${i.name} [${i.note}]`);
@@ -2340,8 +2362,8 @@
             o.items.forEach(i => {
               const key = i.note ? `${i.name} (${i.note})` : i.name;
               groupSummary[key] = (groupSummary[key] || 0) + i.qty;
-              const cat = i.category || categoryMap[i.name] || guessCategory(i.name);
-              if (cat === 'drink') groupDrinkCount += i.qty; else groupMealCount += i.qty;
+              const c = countMealDrink(i, categoryMap);
+              groupMealCount += c.meal; groupDrinkCount += c.drink;
             });
           });
 
@@ -2438,8 +2460,8 @@
             o.items.forEach(i => {
               const key = i.note ? `${i.name} (${i.note})` : i.name;
               groupSummary[key] = (groupSummary[key] || 0) + i.qty;
-              const cat = i.category || categoryMap[i.name] || guessCategory(i.name);
-              if (cat === 'drink') groupDrink += i.qty; else groupMeal += i.qty;
+              const c = countMealDrink(i, categoryMap);
+              groupMeal += c.meal; groupDrink += c.drink;
             });
           });
 
