@@ -314,7 +314,10 @@
       <!-- 【區塊四：歷史資料查詢區（唯讀）】 -->
       <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-2 gap-2">
-          <h2 class="text-lg font-bold text-slate-800">🗂️ 區塊四：歷史資料查詢區</h2>
+          <div>
+            <h2 class="text-lg font-bold text-slate-800">🗂️ 區塊四：歷史資料查詢區</h2>
+            <p id="history-menu-label" class="text-xs text-slate-500 mt-0.5"></p>
+          </div>
           <div class="flex items-center gap-2">
             <select id="history-date-select" onchange="loadHistoryOrders(this.value)" class="border border-slate-300 p-1.5 rounded-lg text-sm bg-white outline-none min-w-[220px]">
               <option value="">— 請選擇訂購日期 —</option>
@@ -784,6 +787,7 @@
       document.getElementById('search-menu-input').value = '';
       document.getElementById('selected-item-panel').classList.add('hidden');
       await fetchHistoryMenus();
+      if (!document.getElementById('admin-section').classList.contains('hidden')) loadHistoryDates();
     }
 
     // 修改處：先依袋號排序 (不分袋排最前面，接著第1袋、第2袋...)，再依訂購人姓名排序
@@ -1684,6 +1688,7 @@
         } else {
           const res = await sb.from('orders').insert([{ user_name: name, items: finalCart, total_price: total, is_paid: false, group_id: currentGroupId, sub_group: 0, room: ROOM }]);
           error = res.error;
+          if (!error) await tagGroupMenu(); // 記錄這一團使用的菜單，供區塊四依菜單分類
         }
 
         if (error) {
@@ -2679,36 +2684,103 @@
       return new Date(iso).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false });
     }
 
+    // 記錄「這一團用的是哪個菜單」：每團第一筆訂單成立時寫入，每團一個 key，彼此不會互相覆蓋
+    async function tagGroupMenu() {
+      if (!currentGroupId || !currentActiveMenuId) return;
+      const key = `group_menu_${currentGroupId}`;
+      try {
+        const { data } = await sb.from('settings').select('key').eq('key', key).maybeSingle();
+        if (!data) await sb.from('settings').upsert({ key, value: JSON.stringify(currentActiveMenuId) });
+      } catch (e) {
+        console.error('記錄團購菜單失敗:', e);
+      }
+    }
+
+    // 舊資料（尚未有菜單紀錄）：用訂單的餐點名稱去比對各菜單，推測是哪個菜單
+    function menuNameSet(menu) {
+      return new Set((Array.isArray(menu.data) ? menu.data : []).map(it => String(it.name || '').trim()).filter(Boolean));
+    }
+    function matchScore(orderNames, menuNames) {
+      if (orderNames.length === 0) return 0;
+      const hit = orderNames.filter(n => menuNames.has(n)).length;
+      return hit / orderNames.length;
+    }
+
     async function loadHistoryDates() {
       const sel = document.getElementById('history-date-select');
       if (!sel) return;
+      const label = document.getElementById('history-menu-label');
       const keep = sel.value;
-      const { data, error } = await sb.from('orders').select('group_id,created_at,total_price')
-        .eq('room', ROOM).order('created_at', { ascending: false });
-      if (error) {
-        console.error('載入歷史日期失敗:', error);
+
+      if (!currentActiveMenuId) {
+        label.innerText = '目前沒有啟用的菜單';
+        sel.innerHTML = '<option value="">— 請先啟用菜單 —</option>';
+        loadHistoryOrders('');
         return;
       }
 
-      // 依 group_id 分團（每按一次「開啟新一團」就是一個新的 group_id）
+      const [ordersRes, menusRes] = await Promise.all([
+        sb.from('orders').select('group_id,created_at,total_price,items').eq('room', ROOM).order('created_at', { ascending: false }),
+        sb.from('menus').select('id,name,data').eq('room', ROOM)
+      ]);
+      if (ordersRes.error) { console.error('載入歷史日期失敗:', ordersRes.error); return; }
+
+      const menus = menusRes.data || [];
+      const activeMenu = menus.find(m => String(m.id) === String(currentActiveMenuId));
+      label.innerText = `僅顯示使用過菜單「${activeMenu ? activeMenu.name : ''}」的訂購日期`;
+
+      // 依 group_id 分團
       const groups = {};
-      (data || []).forEach(o => {
-        const g = groups[o.group_id] || (groups[o.group_id] = { id: o.group_id, count: 0, total: 0, first: o.created_at });
+      (ordersRes.data || []).forEach(o => {
+        const g = groups[o.group_id] || (groups[o.group_id] = { id: o.group_id, count: 0, total: 0, first: o.created_at, names: new Set() });
         g.count++; g.total += o.total_price || 0;
         if (o.created_at < g.first) g.first = o.created_at;
+        (o.items || []).forEach(i => g.names.add(String(i.name || '').trim()));
       });
-      const list = Object.values(groups).sort((a, b) => (a.first < b.first ? 1 : -1));
+
+      // 讀取每團的菜單紀錄
+      const ids = Object.keys(groups);
+      const tagMap = {};
+      if (ids.length > 0) {
+        const { data: tagRows } = await sb.from('settings').select('key,value').in('key', ids.map(id => `group_menu_${id}`));
+        (tagRows || []).forEach(r => {
+          let v = r.value;
+          try { if (typeof v === 'string') v = JSON.parse(v); } catch (e) {}
+          tagMap[r.key.replace('group_menu_', '')] = v;
+        });
+      }
+
+      const activeNames = activeMenu ? menuNameSet(activeMenu) : new Set();
+      const otherMenus = menus.filter(m => String(m.id) !== String(currentActiveMenuId)).map(menuNameSet);
+
+      let unknownCount = 0;
+      const list = Object.values(groups).filter(g => {
+        if (tagMap[g.id] !== undefined) return String(tagMap[g.id]) === String(currentActiveMenuId);
+        // 舊資料（沒有菜單紀錄）：所有餐點都要出現在目前菜單，且其他菜單不能也全部吻合
+        const names = [...g.names].filter(Boolean);
+        const sc = matchScore(names, activeNames);
+        const otherMax = otherMenus.reduce((mx, m) => Math.max(mx, matchScore(names, m)), 0);
+        if (sc === 1 && otherMax < 1) return true;
+        if (sc === 1 && otherMax === 1) unknownCount++; // 多個菜單都吻合，無法判斷，不列出
+        return false;
+      }).sort((a, b) => (a.first < b.first ? 1 : -1));
+      if (unknownCount > 0) label.innerText += `（另有 ${unknownCount} 團舊資料因多個菜單品項相同而無法判斷，未列出）`;
 
       // 同一天有多團時，加上時間以便區分
       const dayCount = {};
       list.forEach(g => { g.day = fmtTaiwanDate(g.first); dayCount[g.day] = (dayCount[g.day] || 0) + 1; });
 
-      sel.innerHTML = '<option value="">— 請選擇訂購日期 —</option>' + list.map(g => {
-        const isCurrent = String(g.id) === String(currentGroupId);
-        const timePart = dayCount[g.day] > 1 ? ` ${fmtTaiwanTime(g.first)}` : '';
-        return `<option value="${g.id}">${g.day}${timePart}｜${g.count} 筆｜$${g.total}${isCurrent ? '（本次）' : ''}</option>`;
-      }).join('');
-      if (keep && groups[keep]) sel.value = keep;
+      if (list.length === 0) {
+        sel.innerHTML = '<option value="">— 此菜單尚無歷史訂單 —</option>';
+      } else {
+        sel.innerHTML = '<option value="">— 請選擇訂購日期 —</option>' + list.map(g => {
+          const isCurrent = String(g.id) === String(currentGroupId);
+          const timePart = dayCount[g.day] > 1 ? ` ${fmtTaiwanTime(g.first)}` : '';
+          return `<option value="${g.id}">${g.day}${timePart}｜${g.count} 筆｜$${g.total}${isCurrent ? '（本次）' : ''}</option>`;
+        }).join('');
+        if (keep && list.some(g => String(g.id) === String(keep))) { sel.value = keep; return; }
+      }
+      loadHistoryOrders(''); // 原本選的那團不屬於目前菜單（或已清除）→ 重置明細區
     }
 
     async function loadHistoryOrders(groupId) {
