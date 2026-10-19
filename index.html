@@ -307,6 +307,41 @@
 
         <!-- 極簡條列式/分組容器 -->
         <div id="orders-container" class="space-y-2"></div>
+
+      </div>
+
+
+      <!-- 【區塊四：歷史資料查詢區（唯讀）】 -->
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-2 gap-2">
+          <h2 class="text-lg font-bold text-slate-800">🗂️ 區塊四：歷史資料查詢區</h2>
+          <div class="flex items-center gap-2">
+            <select id="history-date-select" onchange="loadHistoryOrders(this.value)" class="border border-slate-300 p-1.5 rounded-lg text-sm bg-white outline-none min-w-[220px]">
+              <option value="">— 請選擇訂購日期 —</option>
+            </select>
+            <button type="button" onclick="loadHistoryDates()" title="重新整理日期清單" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold transition">🔄</button>
+          </div>
+        </div>
+
+        <div id="history-stat-box" class="hidden bg-slate-50 p-4 rounded-xl space-y-3 border border-slate-200">
+          <div class="grid grid-cols-3 text-center font-bold text-sm sm:text-base">
+            <div>團購總額：<span id="history-stat-total" class="text-blue-600">$0</span></div>
+            <div>已收金額：<span id="history-stat-paid" class="text-emerald-600">$0</span></div>
+            <div>未收金額：<span id="history-stat-unpaid" class="text-rose-600">$0</span></div>
+          </div>
+          <div class="w-full bg-slate-200 h-3 rounded-full overflow-hidden">
+            <div id="history-progress-bar" class="bg-emerald-500 h-3 w-0 transition-all duration-300"></div>
+          </div>
+        </div>
+
+        <div id="history-tools" class="hidden flex gap-2 items-center no-print">
+          <input type="text" id="history-filter-name" oninput="renderHistoryOrders()" placeholder="🔍 搜尋姓名..." class="border border-slate-300 text-sm p-2 rounded-lg outline-none">
+          <span id="history-count" class="text-xs text-slate-500 font-semibold"></span>
+        </div>
+
+        <div id="history-container" class="space-y-2">
+          <p class="text-slate-400 text-sm text-center py-4">請從上方選擇要查詢的訂購日期</p>
+        </div>
       </div>
     </section>
 
@@ -1721,6 +1756,7 @@
         <button onclick="switchToUserView()" class="bg-rose-700 hover:bg-rose-800 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition">切換前台</button>
       `;
 
+      loadHistoryDates(); // 載入區塊四的歷史日期清單
       startAdminPolling(); // 進入後台畫面：開始每 5 秒自動偵測新訂單、自動刷新排序
     }
 
@@ -1764,6 +1800,7 @@
       await sb.from('orders').delete().lt('created_at', thirtyDaysAgo).eq('room', ROOM);
 
       await fetchOrders();
+      loadHistoryDates();
       await showCustomAlert('已開啟新一團！歷史訂單已歸檔，超過 30 天的舊訂單已自動清理。');
     }
 
@@ -2626,6 +2663,109 @@
           `;
         }).join('') || '<p class="text-slate-400 text-sm text-center py-4">目前沒有符合條件的訂單</p>';
       }
+    }
+
+    // ===== 區塊四：歷史資料查詢（唯讀，不影響區塊三的即時訂單） =====
+    let historyOrders = [];      // 目前選到的那一團訂單
+    let historyGroups = {};      // group_id -> { orders, firstTime }
+
+    function fmtTaiwanDate(iso) {
+      const d = new Date(iso);
+      const date = d.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' });
+      const wk = d.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', weekday: 'short' });
+      return `${date} (${wk.replace('週', '')})`;
+    }
+    function fmtTaiwanTime(iso) {
+      return new Date(iso).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    async function loadHistoryDates() {
+      const sel = document.getElementById('history-date-select');
+      if (!sel) return;
+      const keep = sel.value;
+      const { data, error } = await sb.from('orders').select('group_id,created_at,total_price')
+        .eq('room', ROOM).order('created_at', { ascending: false });
+      if (error) {
+        console.error('載入歷史日期失敗:', error);
+        return;
+      }
+
+      // 依 group_id 分團（每按一次「開啟新一團」就是一個新的 group_id）
+      const groups = {};
+      (data || []).forEach(o => {
+        const g = groups[o.group_id] || (groups[o.group_id] = { id: o.group_id, count: 0, total: 0, first: o.created_at });
+        g.count++; g.total += o.total_price || 0;
+        if (o.created_at < g.first) g.first = o.created_at;
+      });
+      const list = Object.values(groups).sort((a, b) => (a.first < b.first ? 1 : -1));
+
+      // 同一天有多團時，加上時間以便區分
+      const dayCount = {};
+      list.forEach(g => { g.day = fmtTaiwanDate(g.first); dayCount[g.day] = (dayCount[g.day] || 0) + 1; });
+
+      sel.innerHTML = '<option value="">— 請選擇訂購日期 —</option>' + list.map(g => {
+        const isCurrent = String(g.id) === String(currentGroupId);
+        const timePart = dayCount[g.day] > 1 ? ` ${fmtTaiwanTime(g.first)}` : '';
+        return `<option value="${g.id}">${g.day}${timePart}｜${g.count} 筆｜$${g.total}${isCurrent ? '（本次）' : ''}</option>`;
+      }).join('');
+      if (keep && groups[keep]) sel.value = keep;
+    }
+
+    async function loadHistoryOrders(groupId) {
+      const container = document.getElementById('history-container');
+      document.getElementById('history-filter-name').value = '';
+      if (!groupId) {
+        historyOrders = [];
+        document.getElementById('history-stat-box').classList.add('hidden');
+        document.getElementById('history-tools').classList.add('hidden');
+        container.innerHTML = '<p class="text-slate-400 text-sm text-center py-4">請從上方選擇要查詢的訂購日期</p>';
+        return;
+      }
+      container.innerHTML = '<p class="text-slate-400 text-sm text-center py-4">載入中...</p>';
+      const { data, error } = await sb.from('orders').select('*')
+        .eq('group_id', groupId).eq('room', ROOM).order('created_at', { ascending: false });
+      if (error) {
+        container.innerHTML = `<p class="text-rose-500 text-sm text-center py-4">載入失敗：${escapeHtml(error.message)}</p>`;
+        return;
+      }
+      historyOrders = sortOrders(data || []);
+      renderHistoryOrders();
+    }
+
+    function renderHistoryOrders() {
+      const container = document.getElementById('history-container');
+      const keyword = document.getElementById('history-filter-name').value.trim().toLowerCase();
+
+      let total = 0, paid = 0;
+      historyOrders.forEach(o => { total += o.total_price || 0; if (o.is_paid) paid += o.total_price || 0; });
+      document.getElementById('history-stat-total').innerText = `$${total}`;
+      document.getElementById('history-stat-paid').innerText = `$${paid}`;
+      document.getElementById('history-stat-unpaid').innerText = `$${total - paid}`;
+      document.getElementById('history-progress-bar').style.width = `${total > 0 ? (paid / total) * 100 : 0}%`;
+      document.getElementById('history-stat-box').classList.remove('hidden');
+      document.getElementById('history-tools').classList.remove('hidden');
+
+      const filtered = historyOrders.filter(o => String(o.user_name || '').toLowerCase().includes(keyword));
+      document.getElementById('history-count').innerText = `共 ${filtered.length} / ${historyOrders.length} 筆`;
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<p class="text-slate-400 text-sm text-center py-4">沒有符合條件的訂單</p>';
+        return;
+      }
+      container.innerHTML = filtered.map(o => {
+        const sg = (o.sub_group !== null && o.sub_group !== undefined && o.sub_group > 0) ? `第${o.sub_group}袋` : '不分袋';
+        const items = mergeCartItems(o.items || []);
+        return `
+          <div class="flex flex-wrap justify-between items-start p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 gap-2">
+            <div class="flex items-center gap-2">
+              <span class="border border-slate-300 text-xs px-2 py-1 rounded bg-white font-bold text-blue-700">${sg}</span>
+              <span class="${o.is_paid ? 'bg-emerald-600' : 'bg-rose-600'} text-white px-2.5 py-1 rounded-md text-xs font-bold">${o.is_paid ? '🟢 已付款' : '🔴 未付款'}</span>
+              <span class="font-bold text-slate-800 text-base">${escapeHtml(o.user_name)}</span>
+              <span class="text-slate-500 font-extrabold">($${o.total_price})</span>
+            </div>
+            <div class="text-xs text-slate-600 flex-1 px-2 leading-relaxed">${items.map(i => `${escapeHtml(i.name)}${i.note ? `(${escapeHtml(i.note)})` : ''} x${i.qty}`).join('<br>')}</div>
+          </div>`;
+      }).join('');
     }
 
     function escapeHtml(str) {
