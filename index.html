@@ -323,6 +323,7 @@
               <option value="">— 請選擇訂購日期 —</option>
             </select>
             <button type="button" onclick="loadHistoryDates()" title="重新整理日期清單" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold transition">🔄</button>
+            <button type="button" onclick="restoreHistoryToCurrent()" title="把選到的這一團載回區塊三" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap">↩️ 載回區塊三</button>
           </div>
         </div>
 
@@ -1807,6 +1808,40 @@
       await fetchOrders();
       loadHistoryDates();
       await showCustomAlert('已開啟新一團！歷史訂單已歸檔，超過 30 天的舊訂單已自動清理。');
+    }
+
+    async function restoreHistoryToCurrent() {
+      const sel = document.getElementById('history-date-select');
+      const groupId = sel ? sel.value : '';
+      if (!groupId) {
+        await showCustomAlert('請先在區塊四選擇要載回的訂購日期！');
+        return;
+      }
+      if (String(groupId) === String(currentGroupId)) {
+        await showCustomAlert('這一團已經是目前區塊三正在使用的訂單了。');
+        return;
+      }
+
+      const label = sel.options[sel.selectedIndex].text;
+      const ok = await showCustomConfirm(
+        `確定要把「${label}」載回區塊三嗎？\n（目前區塊三的訂單會自動歸檔到區塊四，不會被刪除）`
+      );
+      if (!ok) return;
+
+      const { error } = await sb.from('settings').upsert({
+        key: roomKey('current_group_id'),
+        value: JSON.stringify(groupId)
+      });
+      if (error) {
+        await showCustomAlert('載回失敗：' + error.message);
+        return;
+      }
+
+      currentGroupId = groupId;
+      knownOrderIds = null; // 避免載回的舊訂單被當成「新訂單」跳通知
+      await fetchOrders();
+      await loadHistoryDates();
+      await showCustomAlert('已載回區塊三！');
     }
 
     function openChangePasswordModal() { document.getElementById('password-modal').classList.remove('hidden'); }
