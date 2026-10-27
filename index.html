@@ -1039,11 +1039,9 @@
       return v > 0 ? `(+$${v})` : `(-$${Math.abs(v)})`;
     }
 
-    // 避免「加點」品項名稱本身已含「加」或「不加」字樣時，明細出現重複的「加」字
+    // 加點品項在明細中直接顯示原本名稱，不再自動加上「加」字
     function formatAddonNote(name) {
-      const n = String(name || '');
-      if (n.startsWith('加') || n.startsWith('不')) return n;
-      return `加${n}`;
+      return String(name || '');
     }
 
     // 將加點加價選項欄位資料統一轉為「分組」結構（陣列的陣列），相容舊資料（單一扁平陣列）
