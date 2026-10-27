@@ -1562,7 +1562,10 @@
         box.innerHTML = `<span>🟢 付款狀態：已付款</span><span>應付金額：$${existingOrder.total_price}</span><span class="w-full text-xs font-semibold text-emerald-800">🔒 訂單已鎖定，如需追加或修改品項請聯絡團主</span>`;
       } else {
         box.className = 'p-3 rounded-lg text-sm font-bold flex items-center justify-between gap-2 bg-rose-50 border border-rose-300 text-rose-700';
-        box.innerHTML = `<span>🔴 付款狀態：尚未付款</span><span>應付金額：$${existingOrder.total_price}</span>`;
+        const sf = getShortfall(existingOrder);
+        box.innerHTML = sf > 0
+          ? `<span>🟠 付款狀態：部分付款（已收 $${parseInt(existingOrder.received_amount) || 0}）</span><span>尚差：$${sf}</span>`
+          : `<span>🔴 付款狀態：尚未付款</span><span>應付金額：$${existingOrder.total_price}</span>`;
       }
     }
 
@@ -2615,7 +2618,7 @@
       allOrders.forEach(o => {
         total += o.total_price;
         if (o.is_paid) paid += o.total_price;
-        else unpaid += o.total_price;
+        else { const part = getPartialReceived(o); paid += part; unpaid += o.total_price - part; }
       });
 
       document.getElementById('stat-total').innerText = `$${total}`;
@@ -2637,6 +2640,8 @@
           const changeNum = parseInt(o.change_amount) || 0;
           const changeVal = changeNum;
           const changeBadge = (o.is_paid && changeNum > 0) ? `<button type="button" onclick="clearChange('${o.id}')" title="找錢完成後點我，這個提示就會消失" class="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer">找$${changeVal} ✕</button>` : '';
+          const shortfall = getShortfall(o);
+          const shortBadge = shortfall > 0 ? `<button type="button" onclick="clearShortfall('${o.id}')" title="已先收 $${parseInt(o.received_amount) || 0}，尚差 $${shortfall}（點 ✕ 可清除已收紀錄）" class="bg-rose-100 hover:bg-rose-200 text-rose-700 border border-rose-300 px-1.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer">差$${shortfall} ✕</button>` : '';
           const currentSg = (o.sub_group !== null && o.sub_group !== undefined) ? o.sub_group : 0;
 
           return `
@@ -2661,7 +2666,7 @@
                 </button>
                 <span class="font-bold text-slate-800 text-base">${escapeHtml(o.user_name)}</span>
                 <span class="text-slate-500 font-extrabold">($${o.total_price})</span>
-                ${changeBadge}
+                ${changeBadge}${shortBadge}
               </div>
               <div class="text-xs text-slate-600 flex-1 px-2 leading-relaxed">${sortedItems.map(i => `${i.name}${i.note ? `(${i.note})` : ''} x${i.qty}`).join('<br>')}</div>
               <div class="flex gap-1.5">
@@ -2844,7 +2849,7 @@
       const keyword = document.getElementById('history-filter-name').value.trim().toLowerCase();
 
       let total = 0, paid = 0;
-      historyOrders.forEach(o => { total += o.total_price || 0; if (o.is_paid) paid += o.total_price || 0; });
+      historyOrders.forEach(o => { total += o.total_price || 0; if (o.is_paid) paid += o.total_price || 0; else paid += getPartialReceived(o); });
       document.getElementById('history-stat-total').innerText = `$${total}`;
       document.getElementById('history-stat-paid').innerText = `$${paid}`;
       document.getElementById('history-stat-unpaid').innerText = `$${total - paid}`;
@@ -2869,6 +2874,7 @@
               <span class="${o.is_paid ? 'bg-emerald-600' : 'bg-rose-600'} text-white px-2.5 py-1 rounded-md text-xs font-bold">${o.is_paid ? '🟢 已付款' : '🔴 未付款'}</span>
               <span class="font-bold text-slate-800 text-base">${escapeHtml(o.user_name)}</span>
               <span class="text-slate-500 font-extrabold">($${o.total_price})</span>
+              ${getShortfall(o) > 0 ? `<span class="bg-rose-100 text-rose-700 border border-rose-300 px-1.5 py-0.5 rounded text-[11px] font-bold">差$${getShortfall(o)}</span>` : ''}
             </div>
             <div class="text-xs text-slate-600 flex-1 px-2 leading-relaxed">${items.map(i => `${escapeHtml(i.name)}${i.note ? `(${escapeHtml(i.note)})` : ''} x${i.qty}`).join('<br>')}</div>
           </div>`;
@@ -2877,6 +2883,18 @@
 
     function escapeHtml(str) {
       return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // 部分付款：未付款但已收過一部分錢時，回傳「尚差金額」（沒有部分付款則回傳 0）
+    function getShortfall(o) {
+      if (!o || o.is_paid) return 0;
+      const rec = parseInt(o.received_amount) || 0;
+      if (rec <= 0) return 0;
+      return Math.max(0, (o.total_price || 0) - rec);
+    }
+    function getPartialReceived(o) {
+      if (!o || o.is_paid) return 0;
+      return Math.min(parseInt(o.received_amount) || 0, o.total_price || 0);
     }
 
     async function togglePaid(id) {
@@ -2888,25 +2906,32 @@
 
       let payUpdate;
       if (!order.is_paid) {
-        const input = await showCustomPrompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元\n請輸入實收金額（例如 500 或 1000）：`, order.total_price);
+        // 支援分次付款：已收過的金額會累計，本次輸入的是「這次又收了多少」
+        const prevReceived = parseInt(order.received_amount) || 0;
+        const remaining = Math.max(0, order.total_price - prevReceived);
+        const prevLine = prevReceived > 0 ? `\n已先收：$${prevReceived} 元（尚差 $${remaining} 元）` : '';
+        const input = await showCustomPrompt(`【現場找錢計算機】\n應付金額：$${order.total_price} 元${prevLine}\n請輸入本次實收金額（可只收一部分，例如 100）：`, remaining);
         if (input === null) return;
         const received = parseInt(input);
-        if (isNaN(received)) {
+        if (isNaN(received) || received < 0 || (received === 0 && remaining > 0)) {
           await showCustomAlert('請輸入有效的數字金額！');
           return;
         }
-        if (received < order.total_price) {
-          await showCustomAlert('實收金額小於應付金額！');
-          return;
-        }
-        const change = received - order.total_price;
-        // 找零資訊存進資料庫，換電腦／換瀏覽器也看得到
-        payUpdate = { is_paid: true, received_amount: received, change_amount: change };
+        const totalReceived = prevReceived + received;
 
-        if (change > 0) {
-          await showCustomAlert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
+        if (received < remaining) {
+          // 部分付款：維持「未付款」，但記錄已收金額，畫面顯示「差$XX」
+          payUpdate = { is_paid: false, received_amount: totalReceived, change_amount: 0 };
+          await showCustomAlert(`💡 已記錄部分付款：累計已收 $${totalReceived} 元\n尚差 $${remaining - received} 元（仍為未付款）`);
         } else {
-          await showCustomAlert(`💡 剛好付清，無需找零！\n（確認後將標記為已付款）`);
+          const change = received - remaining;
+          // 找零資訊存進資料庫，換電腦／換瀏覽器也看得到
+          payUpdate = { is_paid: true, received_amount: totalReceived, change_amount: change };
+          if (change > 0) {
+            await showCustomAlert(`💡 找零金額：$${change} 元\n（確認後將標記為已付款）`);
+          } else {
+            await showCustomAlert(`💡 剛好付清，無需找零！\n（確認後將標記為已付款）`);
+          }
         }
       } else {
         payUpdate = { is_paid: false, received_amount: null, change_amount: 0 };
@@ -2914,7 +2939,7 @@
 
       let q = sb.from('orders').update(payUpdate).eq('id', id);
       // 收款時多加一道保險：只有「金額仍是畫面上這個數字」才標記已付款，避免同事剛好在這一刻改了訂單
-      if (payUpdate.is_paid) q = q.eq('total_price', order.total_price);
+      if (payUpdate.is_paid || payUpdate.received_amount) q = q.eq('total_price', order.total_price);
       const { data: payRows, error } = await q.select('id');
 
       if (error) {
@@ -2927,6 +2952,17 @@
         return;
       }
       
+      await fetchOrders();
+    }
+
+    async function clearShortfall(id) {
+      // 收錯金額時，可清除「已先收的部分付款」紀錄（訂單仍維持未付款）
+      const order = allOrders.find(o => String(o.id) === String(id));
+      if (!order) return;
+      const ok = await showCustomConfirm(`要清除 ${order.user_name} 已先收的 $${parseInt(order.received_amount) || 0} 元紀錄嗎？\n（清除後會回到完全未付款）`);
+      if (!ok) return;
+      const { error } = await sb.from('orders').update({ received_amount: null, change_amount: 0 }).eq('id', id);
+      if (error) { await showCustomAlert(`❌ 更新失敗：${error.message}`); }
       await fetchOrders();
     }
 
@@ -3194,7 +3230,7 @@
         const rows = allOrders.map(o => {
           const changeNum = parseInt(o.change_amount) || 0;
           const changeVal = changeNum;
-          const paymentStatusText = o.is_paid ? (changeNum > 0 ? `已付款 (找零$${changeVal})` : '已付款') : '未付款';
+          const paymentStatusText = o.is_paid ? (changeNum > 0 ? `已付款 (找零$${changeVal})` : '已付款') : (getShortfall(o) > 0 ? `未付款 (差$${getShortfall(o)})` : '未付款');
           const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}袋` : '不分袋';
           return {
             '分袋': sgText,
@@ -3267,7 +3303,7 @@
       tbody.innerHTML = allOrders.map(o => {
         const changeNum = parseInt(o.change_amount) || 0;
         const changeVal = changeNum;
-        const statusText = o.is_paid ? (changeNum > 0 ? `已付 (找$${changeVal})` : '已付') : '未付';
+        const statusText = o.is_paid ? (changeNum > 0 ? `已付 (找$${changeVal})` : '已付') : (getShortfall(o) > 0 ? `未付 (差$${getShortfall(o)})` : '未付');
         const sgText = (o.sub_group && o.sub_group > 0) ? `第${o.sub_group}袋` : '-';
         return `
           <tr>
